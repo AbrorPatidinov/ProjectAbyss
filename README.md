@@ -79,9 +79,11 @@ Running an AbyssLang program is a two-step process: **compile** and **execute**.
     
 
 
-```
-🔥 The Benchmark
 
+🔥 The Benchmark
+--------------
+
+```
 To prove the concept, we tested a simple, I/O-heavy task: looping 200,000 times and printing a number. To make it a fair fight, the Python script was heavily optimized to use sys.stdout.write for maximum speed.
 
 AbyssLang didn't just win; it dominated.
