@@ -45,6 +45,17 @@ AbyssLang didn't just win; it dominated.
 
 - C compiler (e.g., GCC or Clang)
 
+# AbyssLang VSCode Extension
+
+A Visual Studio Code extension for the AbyssLang programming language.
+
+## Installation
+
+### Option 1: Install from VSIX
+1. Download the latest `.vsix` from [Releases](https://github.com/AbrorPatidinov/vscode/).
+2. In VSCode, run:
+
+
 ### Build Instructions
 
 1. Clone the repository:

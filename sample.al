@@ -9,4 +9,8 @@ while (i < N) {
   i = i + 1;
 }
 
+
+print_show("");
+print_show("");
+
 print_show("AbyssLang benchmark end\n");

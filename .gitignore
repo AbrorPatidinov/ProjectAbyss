@@ -1,0 +1,7 @@
+# VSCode local settings
+.vscode/
+.vscode-dev/
+*.log
+
+# Extension build artifacts
+*.vsix
