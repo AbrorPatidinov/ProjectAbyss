@@ -40,21 +40,19 @@ AbyssLang
 
 To get a local copy up and running, follow these simple steps.
 
-1.  code Sh
-    
+1)Clone the repository:
 
-*   git clone https://github.com/AbrorPatidinov/ProjectAbyss.gitcd ProjectAbyss
-    
-*   code Sh
-    
+git clone https://github.com/AbrorPatidinov/ProjectAbyss.git
 
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML    `make`  
+cd ProjectAbyss
 
-Alternatively, you can compile the files manually:
+2)Compile the binaries using the provided Makefile:make3)Alternatively, you can compile the files manually:# Compile the AbyssLang Compiler
 
-code Sh
+gcc -std=c11 -O2 -o abyssc abyssc.c
 
-1.  \# Compile the AbyssLang Compilergcc -std=c11 -O2 -o abyssc abyssc.c# Compile the Virtual Machinegcc -std=c11 -O2 -o abyss\_vm vm.c
+\# Compile the Virtual Machine
+
+gcc -std=c11 -O2 -o abyss\_vm vm.c
     
 
 🏃 Run Locally
