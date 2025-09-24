@@ -100,6 +100,7 @@ while (i < N) {
 print_show("AbyssLang benchmark end\n");  
 
 ---
+```
 
 That's it. This will create a clean, properly highlighted code block just like it's supposed to be. No more alphabet soup of languages.
 
