@@ -36,23 +36,24 @@ AbyssLang
     
 
 ⚙️ Installation
----------------
+
+\---------------
 
 To get a local copy up and running, follow these simple steps.
 
-1)Clone the repository:
+Clone the repository:
 
-git clone https://github.com/AbrorPatidinov/ProjectAbyss.git
+command:git clone https://github.com/AbrorPatidinov/ProjectAbyss.git
 
-cd ProjectAbyss
+command:cd ProjectAbyss
 
-2)Compile the binaries using the provided Makefile:make3)Alternatively, you can compile the files manually:# Compile the AbyssLang Compiler
+Compile the binaries using the provided Makefile:makeAlternatively, you can compile the files manually:Compile the AbyssLang Compiler
 
-gcc -std=c11 -O2 -o abyssc abyssc.c
+command: gcc -std=c11 -O2 -o abyssc abyssc.c
 
-\# Compile the Virtual Machine
+Compile the Virtual Machine
 
-gcc -std=c11 -O2 -o abyss\_vm vm.c
+command:gcc -std=c11 -O2 -o abyss\\\_vm vm.c
     
 
 🏃 Run Locally
