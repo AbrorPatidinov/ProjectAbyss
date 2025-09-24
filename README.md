@@ -99,7 +99,6 @@ while (i < N) {
 
 print_show("AbyssLang benchmark end\n");  
 
----
 ```
 
 That's it. This will create a clean, properly highlighted code block just like it's supposed to be. No more alphabet soup of languages.
@@ -133,7 +132,7 @@ Of course, a high-performance language deserves a great editing experience. To m
 
 Since this is all about keeping things simple, you can install it directly without needing the Marketplace.
 
-1.  **Download the Extension**Go to the [**GitHub Releases**](https://www.google.com/url?sa=E&q=https://github.com/AbrorPatidinov/ProjectAbyss/releases/*.vsix) page and download the latest .vsix file.
+1.  **Download the Extension**Go to the [**GitHub Releases**](https://www.google.com/url?sa=E&q=https://github.com/AbrorPatidinov/ProjectAbyss/releases/) page and download the latest .vsix file.
     
 2.  **Install in VS Code**
     
