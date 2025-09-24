@@ -1,0 +1,4 @@
+*.al linguist-language=C
+abyss_vm linguist-generated=true
+abyssc linguist-generated=true
+*.aby linguist-generated=true
