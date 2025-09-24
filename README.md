@@ -1,4 +1,4 @@
-# AbyssLang  Abyss
+# AbyssLang 
 
 <p align="center">
   <img src="https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fcdn.wallpapersafari.com%2F72%2F46%2Fc7niSv.jpg&f=1&nofb=1&ipt=8aabd7486a84b1341efaff473c0d42216bf14373dc86fe62eb6dc2fbb1847944=AbyssLang" alt="AbyssLang Logo">
