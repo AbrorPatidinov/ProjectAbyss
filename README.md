@@ -83,9 +83,26 @@ Usage/Examples
 
 Here is the sample program used in the original benchmark, demonstrating the simple syntax of AbyssLang.
 
-code C
+```al
+// File: sample.al
 
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML    `// File: sample.al  // A simple program to loop N times and print a value.  print_show("AbyssLang benchmark start\n");  i = 0;  N = 200000;  while (i < N) {    print(42);    i = i + 1;  }  print_show("AbyssLang benchmark end\n");`  
+// A simple program to loop N times and print a value.
+print_show("AbyssLang benchmark start\n");
+
+i = 0;
+N = 200000;
+
+while (i < N) {
+  print(42);
+  i = i + 1;
+}
+
+print_show("AbyssLang benchmark end\n");  
+
+---
+
+That's it. This will create a clean, properly highlighted code block just like it's supposed to be. No more alphabet soup of languages.
+
 
 📘 AbyssLang Documentation (v0.1)
 ---------------------------------
