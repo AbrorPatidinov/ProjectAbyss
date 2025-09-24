@@ -11,6 +11,7 @@ while (i < N) {
 
 
 print_show("");
+
 print_show("");
 
 print_show("AbyssLang benchmark end\n");

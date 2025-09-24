@@ -8,5 +8,14 @@
     "prefix": "pr",
     "body": ["print($1);"],
     "description": "Print expression"
+  },
+  "while": {
+    "prefix": "wh",
+    "body": [
+      "while ($1) {",
+      "\t$2",
+      "}"
+    ],
+    "description": "While loop"
   }
 }
