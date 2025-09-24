@@ -21,12 +21,6 @@
   <img alt="Build" src="https://img.shields.io/badge/build-passing-brightgreen.svg?style=for-the-badge">
 </p>
 
----
-
-AbyssLang started with a simple question: can a purpose-built, interpreted language with a lean C virtual machine outperform a highly-optimized, general-purpose language like Python on its own turf?
-
-**The answer is a definitive yes.**
-
 ## Table of Contents
 
 - [The Benchmark That Started It All](#the-benchmark-that-started-it-all)
@@ -39,53 +33,60 @@ AbyssLang started with a simple question: can a purpose-built, interpreted langu
 - [Contributing](#contributing)
 - [License](#license)
 
----
-
 ## The Benchmark That Started It All
 
 The initial goal was to test a simple, I/O-heavy task: looping 200,000 times and printing a number. To make it a fair fight, the Python script was heavily optimized to use `sys.stdout.write`, which is significantly faster than the standard `print()` function.
 
 AbyssLang didn't just win; it dominated.
 
-#### The Code
+## Getting Started
 
-| AbyssLang (`sample.al`)                                                                                                                              | Optimized Python (`test.py`)                                                                                                                    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| ```c
-// Simple, C-like syntax
-print_show("AbyssLang benchmark start\n");
+### Prerequisites
 
-i = 0;
-N = 200000;
+- C compiler (e.g., GCC or Clang)
 
-while (i < N) {
-  print(42);
-  i = i + 1;
-}
+### Build Instructions
 
-print_show("AbyssLang benchmark end\n");
-``` | ```python
-# Optimized for I/O speed
-import sys
-w = sys.stdout.write
+1. Clone the repository:
+```
+git clone https://github.com/AbrorPatidinov/ProjectAbyss.git
+cd ProjectAbyss
+```
 
-N = 200000
+2. Build the AbyssLang compiler and VM:
+```
+gcc -std=c11 -O2 -Wall -o abyssc abyssc.c
+gcc -std=c11 -O2 -Wall -o abyss_vm vm.c
+```
 
-w("Python benchmark start\n")
-for i in range(N):
-    w("42\n")
-w("Python benchmark end\n")
-``` |
+## Usage
 
-#### The Results
+1. Compile an AbyssLang source file to a bytecode file:
+```
+./abyssc sample.al sample.aby
+```
 
-The benchmark, executed on Arch Linux, highlights AbyssLang's superior efficiency.
+2. Run the compiled bytecode file:
+```
+./abyss_vm sample.aby
+```
 
-```sh
-# --- AbyssLang (VM) Performance ---
-# User time (seconds): 0.02
-# Maximum resident set size (kbytes): 2088
+## Roadmap
 
-# --- Python 3 Performance ---
-# User time (seconds): 0.03
-# Maximum resident set size (kbytes): 10204
+- [ ] Implement a more robust standard library
+- [ ] Add support for user-defined functions and modules
+- [ ] Optimize the virtual machine further for even higher performance
+
+## Contributing
+
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.
