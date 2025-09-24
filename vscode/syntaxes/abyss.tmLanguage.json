@@ -1,0 +1,11 @@
+{
+  "scopeName": "source.abyss",
+  "patterns": [
+    { "name": "comment.line.double-slash.abyss", "match": "//.*$" },
+    { "name": "string.quoted.double.abyss", "begin": "\"", "end": "\"", "patterns": [{"name":"constant.character.escape.abyss","match":"\\\\."}] },
+    { "name": "constant.numeric.integer.abyss", "match": "\\b\\d+\\b" },
+    { "name": "keyword.control.abyss", "match": "\\b(print|print_show)\\b" },
+    { "name": "variable.other.abyss", "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b" }
+  ],
+  "repository": {}
+}

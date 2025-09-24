@@ -1,0 +1,7 @@
+{
+    "makefile.configureOnOpen": false,
+    "files.associations": {
+        "string.h": "c",
+        "*.al": "abysslang"
+    }
+}
