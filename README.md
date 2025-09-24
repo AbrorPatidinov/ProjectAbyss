@@ -41,19 +41,25 @@ AbyssLang
 
 To get a local copy up and running, follow these simple steps.
 
-Clone the repository:
+1.  **Clone the repository:**
+    ```sh
+    git clone https://github.com/AbrorPatidinov/ProjectAbyss.git
+    cd ProjectAbyss
+    ```
 
-command:git clone https://github.com/AbrorPatidinov/ProjectAbyss.git
-
-command:cd ProjectAbyss
-
-Compile the binaries using the provided Makefile:makeAlternatively, you can compile the files manually:Compile the AbyssLang Compiler
-
-command: gcc -std=c11 -O2 -o abyssc abyssc.c
-
-Compile the Virtual Machine
-
-command:gcc -std=c11 -O2 -o abyss\\\_vm vm.c
+2.  **Compile the binaries:**
+    The easiest way is to use the provided `Makefile`:
+    ```sh
+    make
+    ```
+    Alternatively, you can compile the files manually:
+    ```sh
+    # Compile the AbyssLang Compiler
+    gcc -std=c11 -O2 -o abyssc abyssc.c
+    
+    # Compile the Virtual Machine
+    gcc -std=c11 -O2 -o abyss_vm vm.c
+    ```
     
 
 🏃 Run Locally
@@ -61,15 +67,15 @@ command:gcc -std=c11 -O2 -o abyss\\\_vm vm.c
 
 Running an AbyssLang program is a two-step process: **compile** and **execute**.
 
-1.  code Sh
-    
+1.  **Compile your `.al` file into bytecode (`.aby`):**
+    ```sh
+    ./abyssc sample.al sample.aby
+    ```
 
-*   ./abyssc sample.al sample.aby
-    
-*   code Sh
-    
-
-1.  ./abyss\_vm sample.aby
+2.  **Execute the bytecode with the VM:**
+    ```sh
+    ./abyss_vm sample.aby
+    ```
     
 
 Usage/Examples
