@@ -78,6 +78,77 @@ Running an AbyssLang program is a two-step process: **compile** and **execute**.
     ```
     
 
+Title:
+
+🔥 The Benchmark
+
+To prove the concept, we tested a simple, I/O-heavy task: looping 200,000 times and printing a number. To make it a fair fight, the Python script was heavily optimized to use sys.stdout.write for maximum speed.
+
+AbyssLang didn't just win; it dominated.
+
+AbyssLang (sample.al)Optimized Python (test.py)
+
+\`\`\`c
+
+// Simple, C-like syntax
+
+print\_show("AbyssLang benchmark start\\n");
+
+i = 0;
+
+N = 200000;
+
+while (i < N) {
+
+print(42);
+
+i = i + 1;
+
+}
+
+print\_show("AbyssLang benchmark end\\n");
+
+|python
+
+Optimized for I/O speed
+
+import sys
+
+w = sys.stdout.write
+
+N = 200000
+
+w("Python benchmark start\\n")
+
+for i in range(N):
+
+w("42\\n")
+
+w("Python benchmark end\\n")
+
+code |
+
+\#### \*\*The Results\*\*
+
+The benchmark, executed on Arch Linux, highlights AbyssLang's superior efficiency:
+
+\`\`\`diff
+
+\--- AbyssLang (VM) Performance ---
+
+\+ User time (seconds): 0.02
+
+\+ Maximum resident set size (kbytes): 2088
+
+\--- Python 3 Performance ---
+
+\- User time (seconds): 0.03
+
+\- Maximum resident set size (kbytes): 10204
+
+AbyssLang was ~33% faster in execution time while using ~80% less memory.
+
+
 Usage/Examples
 --------------
 
