@@ -7,7 +7,7 @@
 #include <time.h>
 
 #define MAGIC "ABYSSBC"
-#define VERSION 7  // Bumped Version
+#define VERSION 8 // Bumped Version
 #define STACK_SIZE (1024 * 1024)
 #define CALL_STACK_SIZE 1024
 
@@ -39,8 +39,9 @@ enum {
     OP_GET_INDEX, OP_SET_INDEX,
     OP_ABYSS_EYE,
     OP_MOD,
-    OP_NEG,   // <--- NEW: Integer Negation
-    OP_NEG_F, // <--- NEW: Float Negation
+    OP_NEG,
+    OP_NEG_F,
+    OP_PRINT_FMT, // <--- NEW OPCODE
     OP_NATIVE
 };
 
@@ -179,7 +180,7 @@ int main(int argc, char **argv) {
             case OP_MUL: { int64_t b=pop(); stack[sp-1] *= b; break; }
             case OP_DIV: { int64_t b=pop(); stack[sp-1] /= b; break; }
             case OP_MOD: { int64_t b=pop(); if(b==0){fprintf(stderr,"Div by 0\n");exit(1);} stack[sp-1] %= b; break; }
-            case OP_NEG: { stack[sp-1] = -stack[sp-1]; break; } // <--- NEW
+            case OP_NEG: { stack[sp-1] = -stack[sp-1]; break; }
 
             // Float Math (Safe Type Punning)
             case OP_ADD_F: {
@@ -210,7 +211,7 @@ int main(int argc, char **argv) {
                 int64_t res; memcpy(&res, &r, 8); push(res);
                 break;
             }
-            case OP_NEG_F: { // <--- NEW
+            case OP_NEG_F: {
                 int64_t ia = pop();
                 double a; memcpy(&a, &ia, 8);
                 a = -a;
@@ -244,6 +245,56 @@ int main(int argc, char **argv) {
             }
             case OP_PRINT_CHAR: { printf("%c", (char)pop()); break; }
             case OP_PRINT_STR: { char *s = (char*)pop(); printf("%s\n", s); break; }
+
+            // --- NEW: Formatted Print ---
+            case OP_PRINT_FMT: {
+                uint8_t argc = code[ip++];
+                // Format string is at stack[sp - 1 - argc]
+                // Args are at stack[sp - argc] ... stack[sp - 1]
+                int64_t fmt_ptr_val = stack[sp - 1 - argc];
+                char *fmt = (char*)fmt_ptr_val;
+
+                int current_arg = 0;
+                for (int i = 0; fmt[i]; i++) {
+                    if (fmt[i] == '%' && fmt[i+1] == '{') {
+                        // Parse placeholder
+                        i += 2; // Skip %{
+                        char type_buf[16];
+                        int ti = 0;
+                        while (fmt[i] && fmt[i] != '}' && ti < 15) {
+                            type_buf[ti++] = fmt[i++];
+                        }
+                        type_buf[ti] = 0;
+
+                        if (current_arg >= argc) {
+                            printf("<?>"); // Missing arg
+                        } else {
+                            int64_t val = stack[sp - argc + current_arg];
+                            if (!strcmp(type_buf, "integer") || !strcmp(type_buf, "int")) {
+                                printf("%ld", val);
+                            } else if (!strcmp(type_buf, "float")) {
+                                double f; memcpy(&f, &val, 8);
+                                printf("%.6f", f);
+                            } else if (!strcmp(type_buf, "str") || !strcmp(type_buf, "string")) {
+                                printf("%s", (char*)val);
+                            } else if (!strcmp(type_buf, "char")) {
+                                printf("%c", (char)val);
+                            } else {
+                                printf("<?%s?>", type_buf); // Unknown type
+                            }
+                            current_arg++;
+                        }
+                    } else {
+                        putchar(fmt[i]);
+                    }
+                }
+                printf("\n");
+
+                // Pop args + format string
+                sp -= (argc + 1);
+                break;
+            }
+            // ----------------------------
 
             case OP_GET_GLOBAL: push(globals[code[ip++]]); break;
             case OP_SET_GLOBAL: globals[code[ip++]] = pop(); break;
