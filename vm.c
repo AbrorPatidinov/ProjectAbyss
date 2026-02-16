@@ -5,9 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include "include/common.h" // <--- NOW USES SHARED DEFINITIONS
 
-#define MAGIC "ABYSSBC"
-#define VERSION 11
 #define STACK_SIZE (1024 * 1024)
 #define CALL_STACK_SIZE 1024
 #define EXCEPTION_STACK_SIZE 256
@@ -23,37 +22,12 @@
 #define C_RED     "\033[31m"
 #define C_GRAY    "\033[90m"
 
-enum {
-    OP_HALT = 0,
-    OP_CONST_INT, OP_CONST_FLOAT, OP_CONST_STR,
-    OP_ADD, OP_SUB, OP_MUL, OP_DIV,
-    OP_ADD_F, OP_SUB_F, OP_MUL_F, OP_DIV_F,
-    OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE,
-    OP_LT_F, OP_LE_F, OP_GT_F, OP_GE_F, OP_EQ_F, OP_NE_F,
-    OP_JMP, OP_JZ,
-    OP_PRINT, OP_PRINT_F, OP_PRINT_STR, OP_PRINT_CHAR,
-    OP_GET_GLOBAL, OP_SET_GLOBAL,
-    OP_GET_LOCAL, OP_SET_LOCAL,
-    OP_CALL, OP_RET, OP_POP,
-    OP_ALLOC_STRUCT, OP_ALLOC_ARRAY, OP_FREE,
-    OP_GET_FIELD, OP_SET_FIELD,
-    OP_GET_INDEX, OP_SET_INDEX,
-    OP_ABYSS_EYE,
-    OP_MOD,
-    OP_NEG,
-    OP_NEG_F,
-    OP_PRINT_FMT,
-    OP_TRY,
-    OP_END_TRY,
-    OP_THROW,
-    OP_NATIVE,
-    OP_DUP // <--- NEW OPCODE
-};
-
 typedef struct AllocInfo {
     void *ptr;
     uint32_t struct_id;
     uint32_t size;
+    size_t alloc_fp;
+    int is_stack;
     struct AllocInfo *next;
 } AllocInfo;
 
@@ -93,17 +67,18 @@ static size_t esp = 0;
 static int64_t globals[256];
 static size_t ip = 0;
 
-static inline void push(int64_t v) { stack[sp++] = v; }
+static inline void push(int64_t v) {
+    if (sp >= STACK_SIZE) { fprintf(stderr, C_RED "FATAL: Stack Overflow" C_RESET "\n"); exit(1); }
+    stack[sp++] = v;
+}
 static inline int64_t pop() {
-    if (sp == 0) {
-        fprintf(stderr, C_RED "FATAL ERROR: Stack Underflow" C_RESET "\n");
-        exit(1);
-    }
+    if (sp == 0) { fprintf(stderr, C_RED "FATAL: Stack Underflow" C_RESET "\n"); exit(1); }
     return stack[--sp];
 }
 
 static void fast_print_int(int64_t n) { printf("%ld\n", n); }
 
+// --- HERE IS YOUR KILLER FEATURE ---
 void abyss_eye() {
     AllocInfo *curr = alloc_head;
     int count = 0;
@@ -114,7 +89,12 @@ void abyss_eye() {
     while (curr) {
         char *type_name = "Array";
         if (curr->struct_id != 0xFFFFFFFF && curr->struct_id < struct_count) type_name = structs[curr->struct_id].name;
-        printf(C_GRAY "  │ " C_RESET C_DIM "0x" C_RESET C_CYAN "%-16lx" C_RESET C_GRAY " │ " C_RESET C_GREEN "%-14s" C_RESET C_GRAY " │ " C_RESET C_YELLOW "%-4u" C_RESET " bytes" C_GRAY "     │" C_RESET "\n", (uintptr_t)curr->ptr, type_name, curr->size);
+
+        char type_display[32];
+        if (curr->is_stack) snprintf(type_display, 32, "%s (Stack)", type_name);
+        else snprintf(type_display, 32, "%s", type_name);
+
+        printf(C_GRAY "  │ " C_RESET C_DIM "0x" C_RESET C_CYAN "%-16lx" C_RESET C_GRAY " │ " C_RESET C_GREEN "%-14s" C_RESET C_GRAY " │ " C_RESET C_YELLOW "%-4u" C_RESET " bytes" C_GRAY "     │" C_RESET "\n", (uintptr_t)curr->ptr, type_display, curr->size);
         total_mem += curr->size; count++; curr = curr->next;
     }
     printf(C_GRAY "  ├────────────────────┴────────────────┴────────────────┤" C_RESET "\n");
@@ -124,9 +104,15 @@ void abyss_eye() {
     fflush(stdout);
 }
 
-void track_alloc(void *ptr, uint32_t sid, uint32_t size) {
+void track_alloc(void *ptr, uint32_t sid, uint32_t size, int is_stack) {
     AllocInfo *node = malloc(sizeof(AllocInfo));
-    node->ptr = ptr; node->struct_id = sid; node->size = size; node->next = alloc_head; alloc_head = node;
+    node->ptr = ptr;
+    node->struct_id = sid;
+    node->size = size;
+    node->alloc_fp = fp;
+    node->is_stack = is_stack;
+    node->next = alloc_head;
+    alloc_head = node;
 }
 
 void untrack_alloc(void *ptr) {
@@ -134,6 +120,20 @@ void untrack_alloc(void *ptr) {
     while (*curr) {
         if ((*curr)->ptr == ptr) { AllocInfo *temp = *curr; *curr = (*curr)->next; free(temp); return; }
         curr = &(*curr)->next;
+    }
+}
+
+void free_stack_allocs(size_t current_fp) {
+    AllocInfo **curr = &alloc_head;
+    while (*curr) {
+        if ((*curr)->is_stack && (*curr)->alloc_fp >= current_fp) {
+            AllocInfo *temp = *curr;
+            *curr = (*curr)->next;
+            free(temp->ptr);
+            free(temp);
+        } else {
+            curr = &(*curr)->next;
+        }
     }
 }
 
@@ -223,16 +223,13 @@ int main(int argc, char **argv) {
                 uint8_t count = code[ip++];
                 int64_t rets[8];
                 for(int i=0; i<count; i++) rets[i] = pop();
-
+                free_stack_allocs(fp);
                 if (csp == 0) goto cleanup;
                 csp--;
                 ip = call_stack[csp].ret_addr;
                 size_t old_fp = call_stack[csp].old_fp;
-
-                sp = fp; // Clean stack frame
-                fp = old_fp;
-
-                for(int i=count-1; i>=0; i--) push(rets[i]); // Push returns back
+                sp = fp; fp = old_fp;
+                for(int i=count-1; i>=0; i--) push(rets[i]);
                 break;
             }
             case OP_POP: sp--; break;
@@ -240,19 +237,23 @@ int main(int argc, char **argv) {
                 uint32_t sid; memcpy(&sid, code+ip, 4); ip+=4;
                 uint32_t size = structs[sid].size * 8;
                 int64_t *ptr = malloc(size); memset(ptr, 0, size);
-                track_alloc(ptr, sid, size); push((int64_t)ptr); break;
+                track_alloc(ptr, sid, size, 0);
+                push((int64_t)ptr); break;
             }
             case OP_ALLOC_ARRAY: {
                 uint32_t elem_size; memcpy(&elem_size, code+ip, 4); ip+=4;
                 int64_t count = pop();
                 uint32_t total_size = count * 8; int64_t *ptr = malloc(total_size); memset(ptr, 0, total_size);
-                track_alloc(ptr, 0xFFFFFFFF, total_size); push((int64_t)ptr); break;
+                track_alloc(ptr, 0xFFFFFFFF, total_size, 0);
+                push((int64_t)ptr); break;
             }
             case OP_FREE: { int64_t *ptr = (int64_t*)pop(); untrack_alloc(ptr); free(ptr); break; }
             case OP_GET_FIELD: { uint8_t offset = code[ip++]; int64_t *ptr = (int64_t*)pop(); push(ptr[offset]); break; }
             case OP_SET_FIELD: { uint8_t offset = code[ip++]; int64_t val = pop(); int64_t *ptr = (int64_t*)pop(); ptr[offset] = val; break; }
             case OP_GET_INDEX: { int64_t idx = pop(); int64_t *ptr = (int64_t*)pop(); push(ptr[idx]); break; }
             case OP_SET_INDEX: { int64_t val = pop(); int64_t idx = pop(); int64_t *ptr = (int64_t*)pop(); ptr[idx] = val; break; }
+
+            // --- HERE IS THE OPCODE HANDLER ---
             case OP_ABYSS_EYE: abyss_eye(); break;
 
             case OP_TRY: {
@@ -265,16 +266,10 @@ int main(int argc, char **argv) {
                 esp++;
                 break;
             }
-            case OP_END_TRY: {
-                if (esp > 0) esp--;
-                break;
-            }
+            case OP_END_TRY: { if (esp > 0) esp--; break; }
             case OP_THROW: {
                 int64_t err_val = pop();
-                if (esp == 0) {
-                    fprintf(stderr, "Uncaught Exception: %s\n", (char*)err_val);
-                    exit(1);
-                }
+                if (esp == 0) { fprintf(stderr, "Uncaught Exception: %s\n", (char*)err_val); exit(1); }
                 esp--;
                 ip = exception_stack[esp].catch_addr;
                 sp = exception_stack[esp].old_sp;
@@ -283,28 +278,23 @@ int main(int argc, char **argv) {
                 push(err_val);
                 break;
             }
-
             case OP_NATIVE: {
                 uint32_t nid; memcpy(&nid, code+ip, 4); ip+=4;
                 if (nid == 0) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); double t = ts.tv_sec + ts.tv_nsec / 1e9; int64_t v; memcpy(&v, &t, 8); push(v); }
                 else if (nid == 1) {
-                    int64_t v;
-                    printf("Input: ");
-                    fflush(stdout);
-                    char buf[64];
-                    if (fgets(buf, sizeof(buf), stdin)) {
-                        v = atoll(buf);
-                    } else {
-                        v = 0;
-                    }
+                    int64_t v; printf("Input: "); fflush(stdout); char buf[64];
+                    if (fgets(buf, sizeof(buf), stdin)) v = atoll(buf); else v = 0;
                     push(v);
                 }
                 break;
             }
-            case OP_DUP: { // <--- NEW OPCODE IMPLEMENTATION
-                if (sp == 0) { fprintf(stderr, "Stack Underflow on DUP\n"); exit(1); }
-                int64_t v = stack[sp-1];
-                push(v);
+            case OP_DUP: { if (sp == 0) { fprintf(stderr, "Stack Underflow on DUP\n"); exit(1); } int64_t v = stack[sp-1]; push(v); break; }
+            case OP_ALLOC_STACK: {
+                uint32_t sid; memcpy(&sid, code+ip, 4); ip+=4;
+                uint32_t size = structs[sid].size * 8;
+                int64_t *ptr = malloc(size); memset(ptr, 0, size);
+                track_alloc(ptr, sid, size, 1);
+                push((int64_t)ptr);
                 break;
             }
         }

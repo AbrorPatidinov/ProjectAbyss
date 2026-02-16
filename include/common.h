@@ -1,0 +1,41 @@
+#ifndef COMMON_H
+#define COMMON_H
+
+#include <stdint.h>
+#include <stdlib.h>
+
+#define MAGIC "ABYSSBC"
+#define VERSION 12
+#define INIT_CAP 128
+
+typedef enum {
+    TYPE_VOID, TYPE_INT, TYPE_FLOAT, TYPE_CHAR,
+    TYPE_STR, TYPE_STRUCT, TYPE_ARRAY
+} DataType;
+
+enum {
+    OP_HALT = 0,
+    OP_CONST_INT, OP_CONST_FLOAT, OP_CONST_STR,
+    OP_ADD, OP_SUB, OP_MUL, OP_DIV,
+    OP_ADD_F, OP_SUB_F, OP_MUL_F, OP_DIV_F,
+    OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE,
+    OP_LT_F, OP_LE_F, OP_GT_F, OP_GE_F, OP_EQ_F, OP_NE_F,
+    OP_JMP, OP_JZ,
+    OP_PRINT, OP_PRINT_F, OP_PRINT_STR, OP_PRINT_CHAR,
+    OP_GET_GLOBAL, OP_SET_GLOBAL,
+    OP_GET_LOCAL, OP_SET_LOCAL,
+    OP_CALL, OP_RET, OP_POP,
+    OP_ALLOC_STRUCT, OP_ALLOC_ARRAY, OP_FREE,
+    OP_GET_FIELD, OP_SET_FIELD,
+    OP_GET_INDEX, OP_SET_INDEX,
+    OP_ABYSS_EYE,
+    OP_MOD,
+    OP_NEG, OP_NEG_F,
+    OP_PRINT_FMT,
+    OP_TRY, OP_END_TRY, OP_THROW,
+    OP_NATIVE,
+    OP_DUP,
+    OP_ALLOC_STACK
+};
+
+#endif
