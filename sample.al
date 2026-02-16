@@ -1,17 +1,11 @@
-// Sample AbyssLang program using a while loop.
-print_show("AbyssLang benchmark start\n");
+print("AbyssLang benchmark start\n");
 
 i = 0;
-N = 200000;
+N = 10000000;
 
 while (i < N) {
   print(42);
   i = i + 1;
 }
 
-
-print_show("");
-
-print_show("");
-
-print_show("AbyssLang benchmark end\n");
+print("AbyssLang benchmark end\n");
