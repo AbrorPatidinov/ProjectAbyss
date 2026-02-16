@@ -1,3 +1,21 @@
+function addition(int x, int y) : int {
+    return x + y;
+}
+
+function multiply(int x, int y) : (int result) {
+    result = x * y;
+    return result;
+}
+
+function division(int x, int y) : (int result), (error divisionByZeroError) {
+    result = x / y;
+    if (y == 0) {
+        throw divisionByZeroError;
+    }
+
+    return result;
+}
+
 void main() {
     print("--- Testing New Features ---");
 

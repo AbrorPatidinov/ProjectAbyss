@@ -5,9 +5,13 @@ void main() {
 
     int a = 50;
     str fullname = "Abrorbek Patidinov";
+    float weight = 3.14;
 
     print("Integer: %{integer}", a);
     print("String: %{string}", fullname);
+    print("Weight: %{float}", weight);
+
+    print("");
 
     if (a > 90) {
         print("Integer %{integer} is higher than 90!", a);
@@ -18,7 +22,7 @@ void main() {
     int i = 5;
     while (i > 5) {
         print("Numbers: %{integer}", i);
-        i += 1; // i++; is not working as well, lets add it
+        i++; // i++; is not working as well, lets add it
     }
 
     print("");
