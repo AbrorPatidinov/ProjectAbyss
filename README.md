@@ -62,10 +62,10 @@ void main() {
 
 | Task | Iterations | AbyssLang | Python 3 | Speedup |
 | :--- | :--- | :--- | :--- | :--- |
-| **Pure Compute (Float Math)** | 100,000,000 | **[INSERT TIME]s** | [INSERT TIME]s | **~[X]x Faster** |
+| **Pure Compute (Float Math)** | 100,000,000 | **9.66ss** | 12.35s | **~1.28x Faster** |
 | **I/O Heavy Loop** | 10,000,000 | **0.107s** | 1.312s | **12.2x Faster** |
 
-*AbyssLang demonstrates significantly lower overhead for arithmetic and object property access compared to Python.*
+*AbyssLang demonstrates lower overhead in arithmetic and object property access compared to CPython in tight compute loops.*
 
 ### 📘 Language Documentation
 
