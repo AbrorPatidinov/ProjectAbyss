@@ -21,6 +21,11 @@ void main() {
         print("  i = %{int}", i);
     }
 
+    print("More for loop !");
+    for (int k = 10; k > 0; k--) {
+        print("Minuses: %{integer}", k);
+    }
+
     print("--- Done ---");
     abyss_eye();
 }
