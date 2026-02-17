@@ -11,7 +11,6 @@ static int line = 1;
 static int col = 1;
 Token cur;
 
-// --- TOKEN NAMES FOR HUMANS ---
 static const char *tk_names[] = {[TK_EOF] = "End of File",
                                  [TK_ID] = "Identifier",
                                  [TK_NUM_INT] = "Integer",
@@ -64,7 +63,9 @@ static const char *tk_names[] = {[TK_EOF] = "End of File",
                                  [TK_PLUS_ASSIGN] = "+=",
                                  [TK_MINUS_ASSIGN] = "-=",
                                  [TK_QUESTION] = "?",
-                                 [TK_STACK] = "stack"};
+                                 [TK_STACK] = "stack",
+                                 [TK_BREAK] = "break",
+                                 [TK_CONTINUE] = "continue"};
 
 const char *tk_str(TkKind k) {
   if (k >= 0 && k < sizeof(tk_names) / sizeof(char *)) {
@@ -73,16 +74,12 @@ const char *tk_str(TkKind k) {
   return "Unknown Token";
 }
 
-// --- VISUAL ERROR CONTEXT ---
 void print_error_context() {
   if (!src)
     return;
-
-  // Find start of the current line
   int current_line = 1;
   char *p = src;
   char *line_start = src;
-
   while (*p && current_line < cur.line) {
     if (*p == '\n') {
       current_line++;
@@ -90,20 +87,13 @@ void print_error_context() {
     }
     p++;
   }
-
-  // Find end of the current line
   char *line_end = line_start;
-  while (*line_end && *line_end != '\n') {
+  while (*line_end && *line_end != '\n')
     line_end++;
-  }
-
-  // Print the visual context
   fprintf(stderr, "\n\033[1;34m     |\033[0m\n");
   fprintf(stderr, "\033[1;34m %3d |\033[0m %.*s\n", cur.line,
           (int)(line_end - line_start), line_start);
   fprintf(stderr, "\033[1;34m     |\033[0m ");
-
-  // Print spaces to align caret
   for (int i = 1; i < cur.col; i++)
     fprintf(stderr, " ");
   fprintf(stderr, "\033[1;31m^ HERE\033[0m\n\n");
@@ -197,6 +187,11 @@ void next() {
       cur.kind = TK_PRINT_CHAR;
     else if (!strcmp(cur.text, "error"))
       cur.kind = TK_STR_TYPE;
+    // --- FIX: RECOGNIZE BREAK AND CONTINUE ---
+    else if (!strcmp(cur.text, "break"))
+      cur.kind = TK_BREAK;
+    else if (!strcmp(cur.text, "continue"))
+      cur.kind = TK_CONTINUE;
     else
       cur.kind = TK_ID;
     return;
@@ -371,8 +366,6 @@ int accept(TkKind k) {
   }
   return 0;
 }
-
-// --- IMPROVED EXPECT ---
 void expect(TkKind k) {
   if (!accept(k)) {
     fail("Expected '%s' but found '%s'", tk_str(k), tk_str(cur.kind));

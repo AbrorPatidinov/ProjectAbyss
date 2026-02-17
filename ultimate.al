@@ -1,214 +1,217 @@
 // --- DATA STRUCTURES ---
 
 struct File {
-    int id;
-    int size;
-    str name;
-    str content;
+  int id;
+  int size;
+  str name;
+  str content;
 }
 
 struct System {
-    int file_count;
-    int max_files;
-    int boot_time;
+  int file_count;
+  int max_files;
+  int boot_time;
 }
 
-// Global array to hold pointers to File structs
-// In AbyssLang, pointers are 64-bit integers, so we use int[]
+// Global pointers
 int[] disk;
 System sys;
 
 // --- HELPER FUNCTIONS ---
 
-// Returns multiple values (Tuple Unpacking Showcase)
-function get_file_stats(File f) : (int id, int size) {
-    id = f.id;
-    size = f.size;
-    return id, size;
+// Feature: Multiple Return Values (Tuple)
+function get_file_meta(File f) : (int id, int size, str name) {
+  return f.id, f.size, f.name;
 }
 
-function find_file_index(int target_id) : (int index) {
-    index = -1;
-    for (int i = 0; i < sys.max_files; i++) {
-        // Check if slot is not empty (0)
-        if (disk[i] != 0) {
-            File f = disk[i]; // Cast int pointer back to struct
-            if (f.id == target_id) {
-                return i;
-            }
-        }
-    }
-    return index;
-}
-
+// Feature: Heap Allocation & Break
 function create_file(int id, str name, str content) : (int success) {
-    if (sys.file_count >= sys.max_files) {
-        throw "Disk Full! Cannot create file.";
+  if (sys.file_count >= sys.max_files) {
+    throw "Disk Full! Delete some files first.";
+  }
+
+  // Find empty slot using BREAK
+  int slot = -1;
+  for (int i = 0; i < sys.max_files; i++) {
+    if (disk[i] == 0) {
+      slot = i;
+      break; // <--- NEW FEATURE: Exit loop immediately
     }
+  }
 
-    // Find empty slot
-    int slot = -1;
-    for (int i = 0; i < sys.max_files; i++) {
-        if (disk[i] == 0) {
-            slot = i;
-            // Break manually by setting iterator to max (since we don't have 'break' keyword exposed yet in logic)
-            i = sys.max_files;
-        }
-    }
+  if (slot == -1) {
+    throw "System Error: Count mismatch (Fragmentation).";
+  }
 
-    // Manual Memory Allocation (Heap)
-    File f = new(File);
-    f.id = id;
-    f.name = name;
-    f.content = content;
-    f.size = 1024; // Mock size
+  // Manual Memory Allocation (Heap)
+  File f = new (File);
+  f.id = id;
+  f.name = name;
+  f.content = content;
+  f.size = 1024;
 
-    disk[slot] = f;
-    sys.file_count++;
+  disk[slot] = f;
 
-    print("File '%{str}' created at memory address %{int}", name, f);
-    return 1;
+  // Feature: Struct Field Increment
+  sys.file_count++;
+
+  print("File '%{str}' created at Index %{int}.", name, slot);
+  return 1;
 }
 
+// Feature: Manual Free & Decrement
 function delete_file(int id) : (int success) {
-    int idx = find_file_index(id);
+  int found = 0;
 
-    if (idx == -1) {
-        throw "File ID not found!";
+  for (int i = 0; i < sys.max_files; i++) {
+    if (disk[i] == 0) {
+      continue; // <--- NEW FEATURE: Skip empty slots
     }
 
-    File f = disk[idx];
+    File f = disk[i];
+    if (f.id == id) {
+      print("Deleting '%{str}'...", f.name);
 
-    print("Deleting file: %{str}...", f.name);
+      free(f);     // <--- Manual Memory Management
+      disk[i] = 0; // Nullify pointer
 
-    // Manual Memory Deallocation
-    free(f);
+      // Feature: Struct Field Decrement
+      sys.file_count--;
 
-    disk[idx] = 0; // Clear pointer
-    sys.file_count--;
+      found = 1;
+      break; // Stop searching
+    }
+  }
 
-    return 1;
+  if (found == 0) {
+    throw "File ID not found!";
+  }
+
+  return 1;
 }
 
-// Stack Allocation Showcase
-function clipboard_test() : (int result) {
-    print("--- Stack Allocation Test ---");
-    // This allocates on the stack frame.
-    // It does NOT need free() and vanishes when function returns.
-    File clip = stack(File);
-    clip.name = "Clipboard_Data";
-    clip.content = "Temporary String";
+// Feature: Stack Allocation (Auto-Free)
+function clipboard_demo() : (int result) {
+  print("--- Stack Memory Test ---");
 
-    print("Clipboard (Stack) created at: %{int}", clip);
-    print("Content: %{str}", clip.content);
+  // This allocates on the stack frame.
+  // It vanishes automatically when function returns.
+  File clip = stack(File);
+  clip.id = 999;
+  clip.name = "clipboard.tmp";
+  clip.content = "Copied Data";
 
-    return 1;
+  print("Clipboard [Stack] Address: %{int}", clip);
+  print("Data: %{str}", clip.content);
+
+  return 1;
 }
 
 // --- MAIN KERNEL ---
 
 void main() {
-    print("========================================");
-    print("      A B Y S S   O S   v 1 . 0         ");
-    print("========================================");
+  print("========================================");
+  print("      A B Y S S   O S   v 2 . 0         ");
+  print("========================================");
 
-    // Initialize System
-    sys = new(System);
-    sys.max_files = 5;
-    sys.file_count = 0;
-    sys.boot_time = clock();
+  // Initialize System
+  sys = new (System);
+  sys.max_files = 5;
+  sys.file_count = 0;
+  sys.boot_time = clock();
 
-    // Initialize Disk (Array of pointers)
-    disk = new(int, 5);
+  // Initialize Disk (Array of pointers)
+  disk = new (int, 5);
 
-    // Init disk to 0
-    for(int i=0; i<5; i++) { disk[i] = 0; }
+  // Init disk to 0
+  for (int i = 0; i < 5; i++) {
+    disk[i] = 0;
+  }
 
-    int running = 1;
-    int next_id = 100;
+  int running = 1;
+  int next_id = 100;
 
-    while (running) {
-        print("");
-        print("--- MENU ---");
-        print("1. Create File (Heap)");
-        print("2. List Files");
-        print("3. Analyze File (Unpacking)");
-        print("4. Delete File (Free)");
-        print("5. Clipboard Test (Stack)");
-        print("6. System Status (Abyss Eye)");
-        print("7. Shutdown");
-        print("Select > ");
+  while (running) {
+    print("");
+    print("--- MENU [Files: %{int}/%{int}] ---", sys.file_count, sys.max_files);
+    print("1. New File");
+    print("2. List Files");
+    print("3. File Info (Unpacking)");
+    print("4. Delete File");
+    print("5. Clipboard (Stack)");
+    print("6. Memory Map (Abyss Eye)");
+    print("7. Shutdown");
+    print("Select > ");
 
-        int choice = input_int();
-        print("");
+    int choice = input_int();
+    print("");
 
-        try {
-            if (choice == 1) {
-                print("Enter dummy content ID (integer):");
-                int dummy_content = input_int();
-
-                // Create file
-                create_file(next_id, "user_doc.txt", "Some content");
-                next_id++;
-            }
-            else if (choice == 2) {
-                print("--- FILE LIST ---");
-                int found = 0;
-                for (int k = 0; k < sys.max_files; k++) {
-                    if (disk[k] != 0) {
-                        File f = disk[k];
-                        print("[ID: %{int}] Name: %{str}", f.id, f.name);
-                        found++;
-                    }
-                }
-                if (found == 0) { print("(Disk Empty)"); }
-            }
-            else if (choice == 3) {
-                print("Enter File ID to analyze:");
-                int target = input_int();
-                int idx = find_file_index(target);
-
-                if (idx == -1) { throw "File not found."; }
-
-                File f = disk[idx];
-
-                // TUPLE UNPACKING SHOWCASE
-                int fid;
-                int fsize;
-                fid, fsize = get_file_stats(f);
-
-                print("Analysis Result -> ID: %{int} | Size: %{int} bytes", fid, fsize);
-            }
-            else if (choice == 4) {
-                print("Enter File ID to delete:");
-                int target = input_int();
-                delete_file(target);
-                print("File deleted successfully.");
-            }
-            else if (choice == 5) {
-                clipboard_test();
-                print("(Back in main: Stack memory automatically reclaimed)");
-            }
-            else if (choice == 6) {
-                // THE ULTIMATE VISUALIZER
-                abyss_eye();
-            }
-            else if (choice == 7) {
-                running = 0;
-            }
+    try {
+      if (choice == 1) {
+        create_file(next_id, "doc.txt", "Hello World");
+        // Feature: Variable Increment
+        next_id++;
+      } else if (choice == 2) {
+        print("--- FILE LIST ---");
+        int empty = 1;
+        for (int k = 0; k < sys.max_files; k++) {
+          if (disk[k] == 0) {
+            continue; // <--- Skip empty
+          }
+          File f = disk[k];
+          print("[%{int}] %{str}", f.id, f.name);
+          empty = 0;
         }
-        catch (err) {
-            print("!!! SYSTEM ERROR !!!");
-            print("Details: %{str}", err);
+        if (empty) {
+          print("(Disk Empty)");
         }
+      } else if (choice == 3) {
+        print("Enter File ID:");
+        int target = input_int();
+        int found = 0;
+
+        for (int i = 0; i < sys.max_files; i++) {
+          if (disk[i] == 0) {
+            continue;
+          }
+
+          File f = disk[i];
+          if (f.id == target) {
+            // Feature: Tuple Unpacking
+            int fid;
+            int fsize;
+            str fname;
+            fid, fsize, fname = get_file_meta(f);
+
+            print("ID: %{int} | Name: %{str} | Size: %{int}", fid, fname,
+                  fsize);
+            found = 1;
+            break;
+          }
+        }
+        if (found == 0) {
+          throw "File not found.";
+        }
+      } else if (choice == 4) {
+        print("Enter File ID to delete:");
+        int target = input_int();
+        delete_file(target);
+        print("Deleted.");
+      } else if (choice == 5) {
+        clipboard_demo();
+        print("(Stack memory reclaimed)");
+      } else if (choice == 6) {
+        abyss_eye();
+      } else if (choice == 7) {
+        running = 0;
+      }
+    } catch (err) {
+      print("!!! ERROR: %{str} !!!", err);
     }
+  }
 
-    print("Shutting down...");
-
-    // Cleanup OS memory
-    free(disk);
-    free(sys);
-
-    print("System Halted.");
-    abyss_eye(); // Should be empty
+  print("Shutting down...");
+  free(disk);
+  free(sys);
+  print("Bye.");
 }

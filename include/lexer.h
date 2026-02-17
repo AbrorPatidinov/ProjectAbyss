@@ -15,7 +15,9 @@ typedef enum {
     TK_PLUS, TK_MINUS, TK_MUL, TK_DIV, TK_MOD,
     TK_EQ, TK_NE, TK_LT, TK_GT, TK_LE, TK_GE,
     TK_INC, TK_DEC, TK_PLUS_ASSIGN, TK_MINUS_ASSIGN,
-    TK_QUESTION, TK_STACK
+    TK_QUESTION, TK_STACK,
+    // --- NEW KEYWORDS ---
+    TK_BREAK, TK_CONTINUE
 } TkKind;
 
 typedef struct {
@@ -33,8 +35,6 @@ void lexer_init(char *source);
 void next();
 int accept(TkKind k);
 void expect(TkKind k);
-
-// --- NEW ERROR REPORTING HELPERS ---
 const char* tk_str(TkKind k);
 void print_error_context();
 

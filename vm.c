@@ -631,6 +631,18 @@ int main(int argc, char **argv) {
       push((int64_t)ptr);
       break;
     }
+    case OP_INC_INDEX: {
+      int64_t idx = pop();
+      int64_t *ptr = (int64_t *)pop();
+      ptr[idx]++;
+      break;
+    }
+    case OP_DEC_INDEX: {
+      int64_t idx = pop();
+      int64_t *ptr = (int64_t *)pop();
+      ptr[idx]--;
+      break;
+    }
     }
   }
 cleanup:

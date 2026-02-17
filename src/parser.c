@@ -7,9 +7,65 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Forward declarations
+// --- FORWARD DECLARATIONS (THE FIX) ---
 DataType expression(int *struct_id, int *array_depth);
 void statement();
+void parse_struct();
+void parse_func();
+void parse_func_tail(DataType *ret_types, int *ret_sids, int *ret_ads,
+                     int ret_count, char *name);
+
+// --- LOOP CONTEXT ---
+typedef struct Loop {
+  size_t continue_addr;
+  size_t *break_patches;
+  int break_count;
+  int break_cap;
+  struct Loop *prev;
+} Loop;
+
+Loop *current_loop = NULL;
+
+void enter_loop(size_t continue_addr) {
+  Loop *l = malloc(sizeof(Loop));
+  l->continue_addr = continue_addr;
+  l->break_patches = NULL;
+  l->break_count = 0;
+  l->break_cap = 0;
+  l->prev = current_loop;
+  current_loop = l;
+}
+
+void add_break() {
+  if (!current_loop)
+    fail("break outside of loop");
+  emit(OP_JMP);
+  if (current_loop->break_count >= current_loop->break_cap) {
+    current_loop->break_cap =
+        current_loop->break_cap ? current_loop->break_cap * 2 : 8;
+    current_loop->break_patches = realloc(
+        current_loop->break_patches, current_loop->break_cap * sizeof(size_t));
+  }
+  current_loop->break_patches[current_loop->break_count++] = code_sz;
+  emit32(0);
+}
+
+void add_continue() {
+  if (!current_loop)
+    fail("continue outside of loop");
+  emit(OP_JMP);
+  emit32(current_loop->continue_addr);
+}
+
+void leave_loop(size_t end_addr) {
+  for (int i = 0; i < current_loop->break_count; i++) {
+    emit_patch(current_loop->break_patches[i], end_addr);
+  }
+  free(current_loop->break_patches);
+  Loop *prev = current_loop->prev;
+  free(current_loop);
+  current_loop = prev;
+}
 
 void parse_type(DataType *type, int *struct_id, int *array_depth) {
   *struct_id = -1;
@@ -451,6 +507,17 @@ void statement() {
     local_count = saved_locals;
     return;
   }
+  if (accept(TK_BREAK)) {
+    add_break();
+    expect(TK_SEMI);
+    return;
+  }
+  if (accept(TK_CONTINUE)) {
+    add_continue();
+    expect(TK_SEMI);
+    return;
+  }
+
   if (accept(TK_TRY)) {
     expect(TK_LBRACE);
     emit(OP_TRY);
@@ -580,10 +647,12 @@ void statement() {
     emit(OP_JZ);
     size_t patch = code_sz;
     emit32(0);
+    enter_loop(start);
     statement();
     emit(OP_JMP);
     emit32(start);
     emit_patch(patch, code_sz);
+    leave_loop(code_sz);
     return;
   }
   if (accept(TK_FOR)) {
@@ -661,10 +730,12 @@ void statement() {
     emit(OP_JMP);
     emit32(start_cond);
     emit_patch(patch_body, code_sz);
+    enter_loop(start_step);
     statement();
     emit(OP_JMP);
     emit32(start_step);
     emit_patch(patch_end, code_sz);
+    leave_loop(code_sz);
     int diff = local_count - saved_locals;
     for (int i = 0; i < diff; i++)
       emit(OP_POP);
@@ -926,17 +997,16 @@ void statement() {
           fail("Unknown field");
         next();
 
-        // --- FIX: Handle ++/-- for fields ---
         if (cur.kind == TK_INC) {
           next();
-          emit(OP_DUP); // [ptr, ptr]
+          emit(OP_DUP);
           emit(OP_GET_FIELD);
-          emit(structs[parent_sid].fields[field_idx].offset); // [ptr, val]
+          emit(structs[parent_sid].fields[field_idx].offset);
           emit(OP_CONST_INT);
           emit32(1);
-          emit(OP_ADD); // [ptr, val+1]
+          emit(OP_ADD);
           emit(OP_SET_FIELD);
-          emit(structs[parent_sid].fields[field_idx].offset); // []
+          emit(structs[parent_sid].fields[field_idx].offset);
           expect(TK_SEMI);
           free(name);
           return;
@@ -1004,22 +1074,18 @@ void statement() {
         expression(&d1, &d2);
         expect(TK_RBRACKET);
 
-        // --- FIX: Handle ++/-- for arrays ---
         if (cur.kind == TK_INC) {
           next();
-          // Stack: [ptr, idx]
-          // We need: [ptr, idx, ptr, idx] to get then set
-          // But we can't easily dup 2 items deep.
-          // Easier: [ptr, idx] -> GET_INDEX -> [val] -> ADD -> [new_val]
-          // But we lost ptr and idx.
-          // We need to keep them.
-          // This is hard with current VM ops without SWAP/ROT.
-          // Hack: Assume we can't do arr[i]++ easily without new opcodes or
-          // complex stack manipulation. BUT, we can do it if we assume the user
-          // won't do complex expressions in index. Let's skip for now or
-          // implement if critical. For now, fail gracefully or implement simple
-          // version.
-          fail("Increment on array index not supported yet");
+          emit(OP_INC_INDEX);
+          expect(TK_SEMI);
+          free(name);
+          return;
+        } else if (cur.kind == TK_DEC) {
+          next();
+          emit(OP_DEC_INDEX);
+          expect(TK_SEMI);
+          free(name);
+          return;
         }
 
         if (cur.kind == TK_ASSIGN) {
