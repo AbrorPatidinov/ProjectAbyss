@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="AbyssLang.png" alt="AbyssLang Logo" width="500"/>
+  <img src="AbyssLang.png" alt="AbyssLang Logo" width="800"/>
 </p>
 
 # 🌌 AbyssLang
