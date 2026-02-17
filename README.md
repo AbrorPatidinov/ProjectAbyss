@@ -1,126 +1,93 @@
-# AbyssLang
 
-![AbyssLang Logo](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fcdn.wallpapersafari.com%2F72%2F46%2Fc7niSv.jpg&f=1&nofb=1&ipt=8aabd7486a84b1341efaff473c0d42216bf14373dc86fe62eb6dc2fbb1847944)
+<p align="center">
+  <img src="AbyssLang.png" alt="AbyssLang Logo" width="500"/>
+</p>
 
-**A lightweight, high-performance interpreted language with a C-based VM.**
+# 🌌 AbyssLang
 
-AbyssLang is designed to be a "transparent" language. It gives you high-level syntax (structs, functions) but keeps you close to the metal with manual memory management and real-time heap visualization.
+> A systems programming language forged in the abyss.
 
-### 🚀 Features
+AbyssLang is a custom-built compiled language with its own:
+- 🧠 Lexer
+- 🧩 Parser
+- ⚙️ Bytecode Compiler
+- 🔥 Virtual Machine
+- 👁️ Memory Visualizer (Abyss Eye)
 
-*   **Blazing Fast**: Significantly faster than Python in raw compute loops.
-*   **Manual Memory Management**: You control the heap with `new()` and `free()`.
-*   **Abyss Eye**: A built-in tool (`abyss_eye()`) to visualize the heap state, object sizes, and memory addresses in real-time.
-*   **Zero Dependencies**: The entire compiler and VM are written in pure C11 standard library.
-*   **Physics Ready**: Supports floating point math, structs, and complex logic.
+Built from scratch in C.
 
-### 🛠️ Installation
+---
 
-```sh
-git clone https://github.com/AbrorPatidinov/ProjectAbyss.git
-cd ProjectAbyss
-make
-```
+## ✨ Features
 
-### ⚡ Quick Start
+- Static typing (int, float, char, str)
+- Structs
+- Arrays
+- Functions with multiple return values
+- Heap & stack allocation
+- Manual memory management
+- Exceptions (try/catch/throw)
+- Custom bytecode VM
+- Built-in benchmarking
+- Memory introspection (Abyss Eye)
 
-**1. The Physics Simulation (`physics.al`)**
-```c
-struct Ball {
-    float y;
-    float vy;
-}
+---
 
+## 🚀 Example
+
+```abyss
 void main() {
-    Ball b = new(Ball);
-    b.y = 20.0;
-    
-    // Physics Loop
-    while (b.y > 0.0) {
-        b.vy = b.vy - 0.05;
-        b.y = b.y + b.vy;
-        
-        if (b.y < 0.0) { b.y = 0.0; }
-        
-        print(b.y);
+    int start = clock();
+    int sum = 0;
+
+    for (int i = 0; i < 1000000; i++) {
+        sum += i;
     }
-    
-    abyss_eye(); // Visualize Memory
-    free(b);
+
+    int end = clock();
+
+    print("Sum: %{int}", sum);
+    print("Elapsed: %{float} sec", (end - start) / 1000.0);
 }
 ```
 
-**2. Compile & Run**
-```sh
-./abyssc physics.al physics.aby
-./abyss_vm physics.aby
+---
+
+## 📊 Benchmarks (1,000,000 loop test)
+
+| Language   | Time (sec) | Time (ms) |
+|------------|------------|-----------|
+| AbyssLang  | ~0.040     | ~40 ms    |
+| Python     | ~0.089     | ~89 ms    |
+
+Measured on Arch Linux (x86_64).
+
+---
+
+## 🛠 Build
+
+```bash
+make
+./abyssc program.al program.aby
+./abyss_vm program.aby
 ```
 
-### 📊 Benchmarks
+---
 
-*Tested on Arch Linux (x86_64). Lower is better.*
+## 🧠 Why It Exists
 
-| Task | Iterations | AbyssLang | Python 3 | Speedup |
-| :--- | :--- | :--- | :--- | :--- |
-| **Pure Compute (Float Math)** | 100,000,000 | **9.66ss** | 12.35s | **~1.28x Faster** |
-| **I/O Heavy Loop** | 10,000,000 | **0.107s** | 1.312s | **12.2x Faster** |
+AbyssLang was built as a deep systems project to explore:
 
-*AbyssLang demonstrates lower overhead in arithmetic and object property access compared to CPython in tight compute loops.*
+- Compiler construction
+- Virtual machine design
+- Memory management
+- Language architecture
 
-### 📘 Language Documentation
+Not a toy. Not a wrapper.  
+A language born from first principles.
 
-#### 1. Variables & Types
-AbyssLang is statically typed.
-```c
-int count = 10;
-float gravity = 9.8;
-char letter = 65; // ASCII
-str name = "Abyss";
-```
+---
 
-#### 2. Structs & Memory
-No classes. Only data structures.
-```c
-struct Player {
-    int hp;
-    int xp;
-}
+## 👤 Author
 
-// Allocate on Heap
-Player p = new(Player);
-p.hp = 100;
-
-// Inspect Memory
-abyss_eye();
-
-// Manual Free
-free(p);
-```
-
-#### 3. Control Flow
-Standard C-style logic.
-```c
-if (x > 10) {
-    print("Big");
-} else {
-    print("Small");
-}
-
-while (x > 0) {
-    x = x - 1;
-}
-```
-
-#### 4. Built-in Functions
-| Function | Description |
-| :--- | :--- |
-| `print(val)` | Prints int, float, or string with newline. |
-| `print_char(val)` | Prints a single ASCII character (no newline). |
-| `input_int()` | Reads an integer from stdin. |
-| `clock()` | Returns current time in seconds (float). |
-| `abyss_eye()` | Prints the current state of the Heap. |
-| `new(Type)` | Allocates memory for a Struct. |
-| `free(var)` | Frees allocated memory. |
-
-### 📜 License
-MIT License.
+Built at 19 by Abror Patidinov.

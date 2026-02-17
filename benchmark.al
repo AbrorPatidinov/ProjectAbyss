@@ -1,19 +1,15 @@
 void main() {
-    print("--- AbyssLang Benchmark ---");
-    print("Enter number of iterations:");
-    int n = input_int();
-
     float start = clock();
+    int sum = 0;
 
-    int i = 0;
-    while (i < n) {
-        i = i + 1;
+    for (int i = 0; i < 1000000; i++) {
+        sum += i;
     }
 
     float end = clock();
-    float duration = end - start;
+    float elapsed = end - start;
 
-    print("Done!");
-    print("Time taken (seconds):");
-    print(duration);
+    print("Sum: %{int}", sum);
+    print("Elapsed: %{float} sec", elapsed);
+    print("Elapsed: %{float} ms", elapsed * 1000.0);
 }
