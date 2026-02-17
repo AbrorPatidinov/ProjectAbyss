@@ -7,12 +7,22 @@ function multiply(int x, int y) : (int result) {
     return result;
 }
 
-function division(int x, int y) : (int result), (error divisionByZeroError) {
-    result = x / y;
+// function division(int x, int y) : (int result, error divisionByZeroError) {
+//     result = x / y;
+//     if (y == 0) {
+//         throw divisionByZeroError;
+//     }
+
+//     return result;
+// }
+
+function division(int x, int y) : (int result) {
+    // CHECK FIRST, THEN DIVIDE
     if (y == 0) {
-        throw divisionByZeroError;
+        throw "Error ! diving by zero is prohibited !";
     }
 
+    result = x / y;
     return result;
 }
 
@@ -43,6 +53,11 @@ void main() {
     for (int k = 10; k > 0; k--) {
         print("Minuses: %{integer}", k);
     }
+
+    print("");
+    print("");
+
+    print(division(10, 0));
 
     print("--- Done ---");
     abyss_eye();

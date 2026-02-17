@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #define MAGIC "ABYSSBC"
 #define VERSION 12
@@ -24,7 +25,7 @@ enum {
     OP_PRINT, OP_PRINT_F, OP_PRINT_STR, OP_PRINT_CHAR,
     OP_GET_GLOBAL, OP_SET_GLOBAL,
     OP_GET_LOCAL, OP_SET_LOCAL,
-    OP_CALL, OP_RET, OP_POP,
+    OP_CALL, OP_RET, OP_POP, OP_ENTER,
     OP_ALLOC_STRUCT, OP_ALLOC_ARRAY, OP_FREE,
     OP_GET_FIELD, OP_SET_FIELD,
     OP_GET_INDEX, OP_SET_INDEX,

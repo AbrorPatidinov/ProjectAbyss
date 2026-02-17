@@ -34,4 +34,8 @@ void next();
 int accept(TkKind k);
 void expect(TkKind k);
 
+// --- NEW ERROR REPORTING HELPERS ---
+const char* tk_str(TkKind k);
+void print_error_context();
+
 #endif
