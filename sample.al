@@ -1,30 +1,13 @@
 void main() {
-    print("");
+    print("AbyssLang benchmark start");
 
-    print("Hello ! from abysslang !");
+    int i = 0;
+    int N = 10000000;
 
-    int a = 50;
-    str fullname = "Abrorbek Patidinov";
-    float weight = 3.14;
-
-    print("Integer: %{integer}", a);
-    print("String: %{string}", fullname);
-    print("Weight: %{float}", weight);
-
-    print("");
-
-    if (a > 90) {
-        print("Integer %{integer} is higher than 90!", a);
-    } else {
-        print("Nice number though, which is %{integer}", a);
+    while (i < N) {
+      print(42);
+      i = i + 1;
     }
 
-    int i = 5;
-    while (i > 5) {
-        print("Numbers: %{integer}", i);
-        i++; // i++; is not working as well, lets add it
-    }
-
-    print("");
-    abyss_eye();
+    print("AbyssLang benchmark end");
 }

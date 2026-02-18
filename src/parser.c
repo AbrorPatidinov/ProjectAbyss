@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// --- FORWARD DECLARATIONS (THE FIX) ---
+// --- FORWARD DECLARATIONS ---
 DataType expression(int *struct_id, int *array_depth);
 void statement();
 void parse_struct();
@@ -139,19 +139,14 @@ DataType factor(int *struct_id, int *array_depth) {
     int sid;
     int ad;
     parse_type(&t, &sid, &ad);
-    if (accept(TK_COMMA)) {
-      fail("Stack arrays not yet supported");
-    } else {
-      expect(TK_RPAREN);
-      if (t != TYPE_STRUCT)
-        fail("stack() expects struct type");
-      emit(OP_ALLOC_STACK);
-      emit32(sid);
-      *struct_id = sid;
-      return TYPE_STRUCT;
-    }
+    expect(TK_RPAREN);
+    if (t != TYPE_STRUCT)
+      fail("stack() expects struct");
+    emit(OP_ALLOC_STACK);
+    emit32(sid);
+    *struct_id = sid;
+    return TYPE_STRUCT;
   }
-
   if (accept(TK_NEW)) {
     expect(TK_LPAREN);
     DataType t;
@@ -172,16 +167,34 @@ DataType factor(int *struct_id, int *array_depth) {
     } else {
       expect(TK_RPAREN);
       if (t != TYPE_STRUCT)
-        fail("new() expects struct or array size");
+        fail("new() expects struct");
       emit(OP_ALLOC_STRUCT);
       emit32(sid);
       *struct_id = sid;
       return TYPE_STRUCT;
     }
   }
+
   if (cur.kind == TK_ID) {
     char *name = strdup(cur.text);
     next();
+
+    // --- NAMESPACE RESOLUTION LOGIC (EXPRESSIONS) ---
+    int lid = find_local(name);
+    int gid = find_global(name);
+
+    if (lid == -1 && gid == -1) {
+      while (accept(TK_DOT)) {
+        if (cur.kind != TK_ID)
+          fail("Expected identifier after dot");
+        size_t len = strlen(name) + 1 + strlen(cur.text) + 1;
+        name = realloc(name, len);
+        strcat(name, ".");
+        strcat(name, cur.text);
+        next();
+      }
+    }
+
     if (accept(TK_LPAREN)) {
       int nid = -1;
       DataType ret = TYPE_VOID;
@@ -192,20 +205,39 @@ DataType factor(int *struct_id, int *array_depth) {
         nid = 1;
         ret = TYPE_INT;
       }
+      // Bridge Calls
+      else if (!strcmp(name, "__bridge_print_str")) {
+        nid = 10;
+        ret = TYPE_VOID;
+      } else if (!strcmp(name, "__bridge_print_int")) {
+        nid = 11;
+        ret = TYPE_VOID;
+      } else if (!strcmp(name, "__bridge_pow")) {
+        nid = 20;
+        ret = TYPE_INT;
+      } else if (!strcmp(name, "__bridge_abs")) {
+        nid = 21;
+        ret = TYPE_INT;
+      }
 
       if (nid != -1) {
+        if (cur.kind != TK_RPAREN) {
+          do {
+            int d1, d2;
+            expression(&d1, &d2);
+          } while (accept(TK_COMMA));
+        }
         expect(TK_RPAREN);
         emit(OP_NATIVE);
         emit32(nid);
         free(name);
-        *struct_id = -1;
-        *array_depth = 0;
         return ret;
       }
 
       int fid = find_func(name);
       if (fid == -1)
         fail("Undefined function '%s'", name);
+
       int args = 0;
       if (cur.kind != TK_RPAREN) {
         do {
@@ -220,21 +252,18 @@ DataType factor(int *struct_id, int *array_depth) {
       emit(OP_CALL);
       emit32(funcs[fid].addr);
       emit(args);
-
       free(name);
-      if (funcs[fid].ret_count > 1)
-        fail("Cannot use multi-return function in expression");
       *struct_id = funcs[fid].ret_struct_ids[0];
       *array_depth = funcs[fid].ret_array_depths[0];
       return funcs[fid].ret_types[0];
     }
 
-    int lid = find_local(name);
-    int gid = -1;
+    if (lid == -1 && gid == -1)
+      fail("Undefined variable '%s'", name);
+
     DataType t = TYPE_VOID;
     int sid = -1;
     int ad = 0;
-
     if (lid != -1) {
       emit(OP_GET_LOCAL);
       emit(locals[lid].offset);
@@ -242,50 +271,33 @@ DataType factor(int *struct_id, int *array_depth) {
       sid = locals[lid].struct_id;
       ad = locals[lid].array_depth;
     } else {
-      gid = find_global(name);
-      if (gid != -1) {
-        emit(OP_GET_GLOBAL);
-        emit(gid);
-        t = globals[gid].type;
-        sid = globals[gid].struct_id;
-        ad = globals[gid].array_depth;
-      } else
-        fail("Undefined variable '%s'", name);
+      emit(OP_GET_GLOBAL);
+      emit(gid);
+      t = globals[gid].type;
+      sid = globals[gid].struct_id;
+      ad = globals[gid].array_depth;
     }
 
     while (1) {
       if (accept(TK_DOT)) {
         if (t != TYPE_STRUCT)
           fail("Dot on non-struct");
-        if (sid < 0 || sid >= struct_count)
-          fail("Invalid struct ID %d", sid);
         if (cur.kind != TK_ID)
           fail("Expected field name");
-
         int parent_sid = sid;
         int field_idx = -1;
-        DataType new_t = TYPE_VOID;
-        int new_sid = -1;
-        int new_ad = 0;
-
         for (int i = 0; i < structs[parent_sid].field_count; i++) {
           if (!strcmp(structs[parent_sid].fields[i].name, cur.text)) {
             field_idx = i;
-            new_t = structs[parent_sid].fields[i].type;
-            new_sid = structs[parent_sid].fields[i].struct_id;
-            new_ad = structs[parent_sid].fields[i].array_depth;
-
-            t = new_t;
-            sid = new_sid;
-            ad = new_ad;
+            t = structs[parent_sid].fields[i].type;
+            sid = structs[parent_sid].fields[i].struct_id;
+            ad = structs[parent_sid].fields[i].array_depth;
             break;
           }
         }
         if (field_idx == -1)
           fail("Unknown field '%s'", cur.text);
-
         next();
-
         if (cur.kind == TK_ASSIGN) {
           next();
           int d1, d2;
@@ -301,7 +313,7 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(structs[parent_sid].fields[field_idx].offset);
           int d1, d2;
           DataType rhs_t = expression(&d1, &d2);
-          if (new_t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
+          if (t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
             emit(OP_ADD_F);
           else
             emit(OP_ADD);
@@ -316,7 +328,7 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(structs[parent_sid].fields[field_idx].offset);
           int d1, d2;
           DataType rhs_t = expression(&d1, &d2);
-          if (new_t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
+          if (t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
             emit(OP_SUB_F);
           else
             emit(OP_SUB);
@@ -324,16 +336,37 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(structs[parent_sid].fields[field_idx].offset);
           free(name);
           return t;
+        } else if (cur.kind == TK_INC) {
+          next();
+          emit(OP_DUP);
+          emit(OP_GET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          emit(OP_CONST_INT);
+          emit32(1);
+          emit(OP_ADD);
+          emit(OP_SET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          free(name);
+          return t;
+        } else if (cur.kind == TK_DEC) {
+          next();
+          emit(OP_DUP);
+          emit(OP_GET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          emit(OP_CONST_INT);
+          emit32(1);
+          emit(OP_SUB);
+          emit(OP_SET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          free(name);
+          return t;
         }
-
         emit(OP_GET_FIELD);
         emit(structs[parent_sid].fields[field_idx].offset);
-
       } else if (accept(TK_LBRACKET)) {
         int d1, d2;
         expression(&d1, &d2);
         expect(TK_RBRACKET);
-
         if (cur.kind == TK_ASSIGN) {
           next();
           int d1, d2;
@@ -341,19 +374,78 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(OP_SET_INDEX);
           free(name);
           return t;
+        } else if (cur.kind == TK_INC) {
+          next();
+          emit(OP_INC_INDEX);
+          free(name);
+          return t;
+        } else if (cur.kind == TK_DEC) {
+          next();
+          emit(OP_DEC_INDEX);
+          free(name);
+          return t;
         }
-
         emit(OP_GET_INDEX);
         t = TYPE_INT;
       } else
         break;
     }
-
     if (accept(TK_ASSIGN)) {
       emit(OP_POP);
       int d1, d2;
       expression(&d1, &d2);
-
+      if (lid != -1) {
+        emit(OP_SET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_SET_GLOBAL);
+        emit(gid);
+      }
+      free(name);
+      return t;
+    } else if (accept(TK_INC)) {
+      emit(OP_CONST_INT);
+      emit32(1);
+      emit(OP_ADD);
+      if (lid != -1) {
+        emit(OP_SET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_SET_GLOBAL);
+        emit(gid);
+      }
+      free(name);
+      return t;
+    } else if (accept(TK_DEC)) {
+      emit(OP_CONST_INT);
+      emit32(1);
+      emit(OP_SUB);
+      if (lid != -1) {
+        emit(OP_SET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_SET_GLOBAL);
+        emit(gid);
+      }
+      free(name);
+      return t;
+    } else if (accept(TK_PLUS_ASSIGN)) {
+      int d1, d2;
+      expression(&d1, &d2);
+      emit(OP_ADD);
+      if (lid != -1) {
+        emit(OP_SET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_SET_GLOBAL);
+        emit(gid);
+      }
+      free(name);
+      return t;
+    } else if (accept(TK_MINUS_ASSIGN)) {
+      int d1, d2;
+      expression(&d1, &d2);
+      emit(OP_SUB);
       if (lid != -1) {
         emit(OP_SET_LOCAL);
         emit(locals[lid].offset);
@@ -375,8 +467,7 @@ DataType factor(int *struct_id, int *array_depth) {
     expect(TK_RPAREN);
     return t;
   }
-  fail("Unexpected token '%s' (Kind: %d)", cur.text ? cur.text : "EOF",
-       cur.kind);
+  fail("Unexpected token '%s'", cur.text ? cur.text : "EOF");
   return TYPE_VOID;
 }
 
@@ -387,17 +478,13 @@ DataType term(int *struct_id, int *array_depth) {
     next();
     int d1, d2;
     DataType t2 = factor(&d1, &d2);
-    if (op == TK_MOD) {
-      if (t == TYPE_FLOAT || t2 == TYPE_FLOAT)
-        fail("Modulo on float not supported");
+    if (op == TK_MOD)
       emit(OP_MOD);
-    } else {
-      if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
-        emit(op == TK_MUL ? OP_MUL_F : OP_DIV_F);
-        t = TYPE_FLOAT;
-      } else
-        emit(op == TK_MUL ? OP_MUL : OP_DIV);
-    }
+    else if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+      emit(op == TK_MUL ? OP_MUL_F : OP_DIV_F);
+      t = TYPE_FLOAT;
+    } else
+      emit(op == TK_MUL ? OP_MUL : OP_DIV);
   }
   return t;
 }
@@ -426,47 +513,31 @@ DataType rel_expr(int *struct_id, int *array_depth) {
     int d1, d2;
     DataType t2 = add_expr(&d1, &d2);
     if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
-      switch (op) {
-      case TK_EQ:
+      if (op == TK_EQ)
         emit(OP_EQ_F);
-        break;
-      case TK_NE:
+      else if (op == TK_NE)
         emit(OP_NE_F);
-        break;
-      case TK_LT:
+      else if (op == TK_LT)
         emit(OP_LT_F);
-        break;
-      case TK_LE:
+      else if (op == TK_LE)
         emit(OP_LE_F);
-        break;
-      case TK_GT:
+      else if (op == TK_GT)
         emit(OP_GT_F);
-        break;
-      case TK_GE:
+      else if (op == TK_GE)
         emit(OP_GE_F);
-        break;
-      }
     } else {
-      switch (op) {
-      case TK_EQ:
+      if (op == TK_EQ)
         emit(OP_EQ);
-        break;
-      case TK_NE:
+      else if (op == TK_NE)
         emit(OP_NE);
-        break;
-      case TK_LT:
+      else if (op == TK_LT)
         emit(OP_LT);
-        break;
-      case TK_LE:
+      else if (op == TK_LE)
         emit(OP_LE);
-        break;
-      case TK_GT:
+      else if (op == TK_GT)
         emit(OP_GT);
-        break;
-      case TK_GE:
+      else if (op == TK_GE)
         emit(OP_GE);
-        break;
-      }
     }
     return TYPE_INT;
   }
@@ -517,7 +588,6 @@ void statement() {
     expect(TK_SEMI);
     return;
   }
-
   if (accept(TK_TRY)) {
     expect(TK_LBRACE);
     emit(OP_TRY);
@@ -539,7 +609,7 @@ void statement() {
     expect(TK_CATCH);
     expect(TK_LPAREN);
     if (cur.kind != TK_ID)
-      fail("Expected error variable name");
+      fail("Expected error variable");
     add_local(strdup(cur.text), TYPE_STR, -1, 0);
     next();
     expect(TK_RPAREN);
@@ -556,7 +626,7 @@ void statement() {
     int d1, d2;
     DataType t = expression(&d1, &d2);
     if (t != TYPE_STR)
-      fail("Throw expects a string message");
+      fail("Throw expects string");
     expect(TK_SEMI);
     emit(OP_THROW);
     return;
@@ -574,7 +644,7 @@ void statement() {
     DataType t = expression(&d1, &d2);
     if (cur.kind == TK_COMMA) {
       if (t != TYPE_STR)
-        fail("First argument of formatted print must be a string");
+        fail("First arg of formatted print must be string");
       int arg_count = 0;
       while (accept(TK_COMMA)) {
         expression(&d1, &d2);
@@ -592,10 +662,10 @@ void statement() {
       emit(OP_PRINT);
     else if (t == TYPE_FLOAT)
       emit(OP_PRINT_F);
-    else if (t == TYPE_CHAR)
-      emit(OP_PRINT_CHAR);
     else if (t == TYPE_STR)
       emit(OP_PRINT_STR);
+    else if (t == TYPE_CHAR)
+      emit(OP_PRINT_CHAR);
     else
       fail("Cannot print type %d", t);
     return;
@@ -675,8 +745,6 @@ void statement() {
       next();
       int lid = find_local(name);
       int gid = find_global(name);
-      if (lid == -1 && gid == -1)
-        fail("Unknown variable in for-loop step");
       if (accept(TK_INC)) {
         if (lid != -1) {
           emit(OP_GET_LOCAL);
@@ -751,10 +819,9 @@ void statement() {
     size_t patch_else = code_sz;
     emit32(0);
     statement();
-    size_t patch_end = 0;
     if (accept(TK_ELSE)) {
       emit(OP_JMP);
-      patch_end = code_sz;
+      size_t patch_end = code_sz;
       emit32(0);
       emit_patch(patch_else, code_sz);
       statement();
@@ -770,13 +837,8 @@ void statement() {
     int ad = 0;
     DataType type = TYPE_VOID;
     int is_decl = 0;
-    if (cur.kind == TK_INT || cur.kind == TK_FLOAT || cur.kind == TK_CHAR ||
-        cur.kind == TK_STR_TYPE)
+    if (cur.kind != TK_ID || find_struct(cur.text) != -1)
       is_decl = 1;
-    else if (cur.kind == TK_ID) {
-      if (find_struct(cur.text) != -1)
-        is_decl = 1;
-    }
     if (is_decl) {
       parse_type(&type, &sid, &ad);
       if (cur.kind == TK_ID) {
@@ -784,10 +846,7 @@ void statement() {
         next();
         if (accept(TK_ASSIGN)) {
           int rhs_sid, rhs_ad;
-          DataType rhs_t = expression(&rhs_sid, &rhs_ad);
-          if (type == TYPE_STRUCT && rhs_t == TYPE_STRUCT) {
-            sid = rhs_sid;
-          }
+          expression(&rhs_sid, &rhs_ad);
         } else {
           emit(OP_CONST_INT);
           emit32(0);
@@ -799,35 +858,29 @@ void statement() {
     }
   }
 
-  // --- TUPLE UNPACKING (h, d = split(8)) ---
+  // Tuple Unpacking
   if (cur.kind == TK_ID) {
     char *name = strdup(cur.text);
     next();
-
     if (cur.kind == TK_COMMA) {
       char *names[8];
       names[0] = name;
       int count = 1;
-
       while (accept(TK_COMMA)) {
         if (cur.kind != TK_ID)
-          fail("Expected variable name in unpacking");
+          fail("Expected var name");
         names[count++] = strdup(cur.text);
         next();
       }
-
       expect(TK_ASSIGN);
-
       if (cur.kind != TK_ID)
-        fail("Expected function call for unpacking");
+        fail("Expected func call");
       char *func_name = strdup(cur.text);
       next();
       expect(TK_LPAREN);
-
       int fid = find_func(func_name);
       if (fid == -1)
-        fail("Undefined function '%s'", func_name);
-
+        fail("Undefined func");
       int args = 0;
       if (cur.kind != TK_RPAREN) {
         do {
@@ -838,16 +891,9 @@ void statement() {
       }
       expect(TK_RPAREN);
       expect(TK_SEMI);
-
-      if (args != funcs[fid].arg_count)
-        fail("Arg count mismatch");
-      if (funcs[fid].ret_count != count)
-        fail("Return count mismatch");
-
       emit(OP_CALL);
       emit32(funcs[fid].addr);
       emit(args);
-
       for (int i = count - 1; i >= 0; i--) {
         int lid = find_local(names[i]);
         int gid = find_global(names[i]);
@@ -857,18 +903,50 @@ void statement() {
         } else if (gid != -1) {
           emit(OP_SET_GLOBAL);
           emit(gid);
-        } else
-          fail("Unknown variable '%s'", names[i]);
+        }
         free(names[i]);
       }
       free(func_name);
       return;
     }
-
+    // Function call as statement
     if (accept(TK_LPAREN)) {
+      // --- NATIVE/BRIDGE CALLS AS STATEMENTS ---
+      int nid = -1;
+      if (!strcmp(name, "clock"))
+        nid = 0;
+      else if (!strcmp(name, "input_int"))
+        nid = 1;
+      else if (!strcmp(name, "__bridge_print_str"))
+        nid = 10;
+      else if (!strcmp(name, "__bridge_print_int"))
+        nid = 11;
+      else if (!strcmp(name, "__bridge_print_float"))
+        nid = 12;
+      else if (!strcmp(name, "__bridge_pow"))
+        nid = 20;
+      else if (!strcmp(name, "__bridge_abs"))
+        nid = 21;
+
+      if (nid != -1) {
+        if (cur.kind != TK_RPAREN) {
+          do {
+            int d1, d2;
+            expression(&d1, &d2);
+          } while (accept(TK_COMMA));
+        }
+        expect(TK_RPAREN);
+        expect(TK_SEMI);
+        emit(OP_NATIVE);
+        emit32(nid);
+        free(name);
+        return;
+      }
+      // -----------------------------------------
+
       int fid = find_func(name);
       if (fid == -1)
-        fail("Undefined function '%s'", name);
+        fail("Undefined func");
       int args = 0;
       if (cur.kind != TK_RPAREN) {
         do {
@@ -887,27 +965,70 @@ void statement() {
       free(name);
       return;
     }
-
+    // Assignment or Inc/Dec
     int lid = find_local(name);
     int gid = find_global(name);
-    DataType t;
-    int sid;
-    int ad;
-    if (lid != -1) {
-      emit(OP_GET_LOCAL);
-      emit(locals[lid].offset);
-      t = locals[lid].type;
-      sid = locals[lid].struct_id;
-      ad = locals[lid].array_depth;
-    } else if (gid != -1) {
-      emit(OP_GET_GLOBAL);
-      emit(gid);
-      t = globals[gid].type;
-      sid = globals[gid].struct_id;
-      ad = globals[gid].array_depth;
-    } else
+
+    // --- NAMESPACE RESOLUTION FOR STATEMENTS ---
+    if (lid == -1 && gid == -1) {
+      while (accept(TK_DOT)) {
+        if (cur.kind != TK_ID)
+          fail("Expected identifier after dot");
+        size_t len = strlen(name) + 1 + strlen(cur.text) + 1;
+        name = realloc(name, len);
+        strcat(name, ".");
+        strcat(name, cur.text);
+        next();
+      }
+      // Re-check for function call after namespace resolution
+      if (accept(TK_LPAREN)) {
+        int nid = -1;
+        if (!strcmp(name, "__bridge_print_str"))
+          nid = 10;
+        else if (!strcmp(name, "__bridge_print_int"))
+          nid = 11;
+        else if (!strcmp(name, "__bridge_print_float"))
+          nid = 12;
+
+        if (nid != -1) {
+          if (cur.kind != TK_RPAREN) {
+            do {
+              int d1, d2;
+              expression(&d1, &d2);
+            } while (accept(TK_COMMA));
+          }
+          expect(TK_RPAREN);
+          expect(TK_SEMI);
+          emit(OP_NATIVE);
+          emit32(nid);
+          free(name);
+          return;
+        }
+
+        int fid = find_func(name);
+        if (fid == -1)
+          fail("Undefined func '%s'", name);
+        int args = 0;
+        if (cur.kind != TK_RPAREN) {
+          do {
+            int d1, d2;
+            expression(&d1, &d2);
+            args++;
+          } while (accept(TK_COMMA));
+        }
+        expect(TK_RPAREN);
+        expect(TK_SEMI);
+        emit(OP_CALL);
+        emit32(funcs[fid].addr);
+        emit(args);
+        for (int i = 0; i < funcs[fid].ret_count; i++)
+          emit(OP_POP);
+        free(name);
+        return;
+      }
       fail("Undefined variable '%s'", name);
-    (void)ad;
+    }
+    // -------------------------------------------
 
     if (accept(TK_INC)) {
       emit(OP_CONST_INT);
@@ -970,6 +1091,21 @@ void statement() {
       return;
     }
 
+    // Field access assignment
+    DataType t = TYPE_VOID;
+    int sid = -1;
+    if (lid != -1) {
+      emit(OP_GET_LOCAL);
+      emit(locals[lid].offset);
+      t = locals[lid].type;
+      sid = locals[lid].struct_id;
+    } else {
+      emit(OP_GET_GLOBAL);
+      emit(gid);
+      t = globals[gid].type;
+      sid = globals[gid].struct_id;
+    }
+
     while (1) {
       if (accept(TK_DOT)) {
         if (t != TYPE_STRUCT)
@@ -978,26 +1114,56 @@ void statement() {
           fail("Expected field name");
         int parent_sid = sid;
         int field_idx = -1;
-        DataType new_t = TYPE_VOID;
-        int new_sid = -1;
-        int new_ad = 0;
         for (int i = 0; i < structs[parent_sid].field_count; i++) {
           if (!strcmp(structs[parent_sid].fields[i].name, cur.text)) {
             field_idx = i;
-            new_t = structs[parent_sid].fields[i].type;
-            new_sid = structs[parent_sid].fields[i].struct_id;
-            new_ad = structs[parent_sid].fields[i].array_depth;
-            t = new_t;
-            sid = new_sid;
-            ad = new_ad;
+            t = structs[parent_sid].fields[i].type;
+            sid = structs[parent_sid].fields[i].struct_id;
             break;
           }
         }
         if (field_idx == -1)
-          fail("Unknown field");
+          fail("Unknown field '%s'", cur.text);
         next();
-
-        if (cur.kind == TK_INC) {
+        if (cur.kind == TK_ASSIGN) {
+          next();
+          int d1, d2;
+          expression(&d1, &d2);
+          emit(OP_SET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          free(name);
+          return;
+        } else if (cur.kind == TK_PLUS_ASSIGN) {
+          next();
+          emit(OP_DUP);
+          emit(OP_GET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          int d1, d2;
+          DataType rhs_t = expression(&d1, &d2);
+          if (t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
+            emit(OP_ADD_F);
+          else
+            emit(OP_ADD);
+          emit(OP_SET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          free(name);
+          return;
+        } else if (cur.kind == TK_MINUS_ASSIGN) {
+          next();
+          emit(OP_DUP);
+          emit(OP_GET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          int d1, d2;
+          DataType rhs_t = expression(&d1, &d2);
+          if (t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
+            emit(OP_SUB_F);
+          else
+            emit(OP_SUB);
+          emit(OP_SET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+          free(name);
+          return;
+        } else if (cur.kind == TK_INC) {
           next();
           emit(OP_DUP);
           emit(OP_GET_FIELD);
@@ -1007,7 +1173,6 @@ void statement() {
           emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_DEC) {
@@ -1020,50 +1185,6 @@ void statement() {
           emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI);
-          free(name);
-          return;
-        }
-
-        if (cur.kind == TK_ASSIGN) {
-          next();
-          int d1, d2;
-          expression(&d1, &d2);
-          expect(TK_SEMI);
-          emit(OP_SET_FIELD);
-          emit(structs[parent_sid].fields[field_idx].offset);
-          free(name);
-          return;
-        } else if (cur.kind == TK_PLUS_ASSIGN) {
-          next();
-          emit(OP_DUP);
-          emit(OP_GET_FIELD);
-          emit(structs[parent_sid].fields[field_idx].offset);
-          int d1, d2;
-          DataType rhs_t = expression(&d1, &d2);
-          if (new_t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
-            emit(OP_ADD_F);
-          else
-            emit(OP_ADD);
-          expect(TK_SEMI);
-          emit(OP_SET_FIELD);
-          emit(structs[parent_sid].fields[field_idx].offset);
-          free(name);
-          return;
-        } else if (cur.kind == TK_MINUS_ASSIGN) {
-          next();
-          emit(OP_DUP);
-          emit(OP_GET_FIELD);
-          emit(structs[parent_sid].fields[field_idx].offset);
-          int d1, d2;
-          DataType rhs_t = expression(&d1, &d2);
-          if (new_t == TYPE_FLOAT || rhs_t == TYPE_FLOAT)
-            emit(OP_SUB_F);
-          else
-            emit(OP_SUB);
-          expect(TK_SEMI);
-          emit(OP_SET_FIELD);
-          emit(structs[parent_sid].fields[field_idx].offset);
           free(name);
           return;
         }
@@ -1073,31 +1194,26 @@ void statement() {
         int d1, d2;
         expression(&d1, &d2);
         expect(TK_RBRACKET);
-
-        if (cur.kind == TK_INC) {
+        if (cur.kind == TK_ASSIGN) {
+          next();
+          int d1, d2;
+          expression(&d1, &d2);
+          emit(OP_SET_INDEX);
+          free(name);
+          return;
+        } else if (cur.kind == TK_INC) {
           next();
           emit(OP_INC_INDEX);
-          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_DEC) {
           next();
           emit(OP_DEC_INDEX);
-          expect(TK_SEMI);
-          free(name);
-          return;
-        }
-
-        if (cur.kind == TK_ASSIGN) {
-          next();
-          int d1, d2;
-          expression(&d1, &d2);
-          expect(TK_SEMI);
-          emit(OP_SET_INDEX);
           free(name);
           return;
         }
         emit(OP_GET_INDEX);
+        t = TYPE_INT;
       } else
         break;
     }
@@ -1117,19 +1233,16 @@ void statement() {
       free(name);
       return;
     }
-
     emit(OP_POP);
     expect(TK_SEMI);
     free(name);
     return;
   }
 
-  // Expression statement
   int d1, d2;
   DataType expr_type = expression(&d1, &d2);
-  if (expr_type != TYPE_VOID) {
+  if (expr_type != TYPE_VOID)
     emit(OP_POP);
-  }
   expect(TK_SEMI);
 }
 
@@ -1209,6 +1322,19 @@ void parse_func() {
       fail("Expected func name");
     char *name = strdup(cur.text);
     next();
+
+    // --- NAMESPACE DEFINITION LOGIC ---
+    while (accept(TK_DOT)) {
+      if (cur.kind != TK_ID)
+        fail("Expected identifier after dot");
+      size_t len = strlen(name) + 1 + strlen(cur.text) + 1;
+      name = realloc(name, len);
+      strcat(name, ".");
+      strcat(name, cur.text);
+      next();
+    }
+    // ----------------------------------
+
     int fid = add_func(name, code_sz);
     expect(TK_LPAREN);
     local_count = 0;
@@ -1285,7 +1411,25 @@ void parse_func() {
 void parse_program() {
   next();
   while (cur.kind != TK_EOF) {
-    if (cur.kind == TK_STRUCT) {
+    if (cur.kind == TK_IMPORT) {
+      next(); // skip 'import'
+      char path[256] = {0};
+      if (cur.kind != TK_ID)
+        fail("Expected module name");
+      strcat(path, cur.text);
+      next();
+      while (accept(TK_DOT)) {
+        strcat(path, "/");
+        if (cur.kind != TK_ID)
+          fail("Expected module part");
+        strcat(path, cur.text);
+        next();
+      }
+      strcat(path, ".al");
+      expect(TK_SEMI);
+      lexer_include(path);
+      continue;
+    } else if (cur.kind == TK_STRUCT) {
       parse_struct();
     } else if (cur.kind == TK_FUNCTION) {
       emit(OP_JMP);

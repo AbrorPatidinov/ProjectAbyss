@@ -16,8 +16,8 @@ typedef enum {
     TK_EQ, TK_NE, TK_LT, TK_GT, TK_LE, TK_GE,
     TK_INC, TK_DEC, TK_PLUS_ASSIGN, TK_MINUS_ASSIGN,
     TK_QUESTION, TK_STACK,
-    // --- NEW KEYWORDS ---
-    TK_BREAK, TK_CONTINUE
+    TK_BREAK, TK_CONTINUE,
+    TK_IMPORT
 } TkKind;
 
 typedef struct {
@@ -32,6 +32,7 @@ typedef struct {
 extern Token cur;
 
 void lexer_init(char *source);
+void lexer_include(char *filename);
 void next();
 int accept(TkKind k);
 void expect(TkKind k);

@@ -6,25 +6,25 @@ set -euo pipefail
 N=10000000
 
 # --- Build Step ---
-echo "Building AbyssLang compiler and VM (MAX PERFORMANCE)..."
-gcc -std=c11 -O3 -march=native -flto -Wall -o abyssc abyssc.c
-gcc -std=c11 -O3 -march=native -flto -Wall -o abyss_vm vm.c
-echo "Build complete."
+echo "Building AbyssLang..."
+make
 
-# --- Generate AbyssLang Source (Dynamic N) ---
+# --- Generate AbyssLang Source ---
 echo "Generating sample.al with N=${N}..."
 cat > sample.al <<AL
-print_show("AbyssLang benchmark start\n");
+void main() {
+    print("AbyssLang benchmark start");
 
-i = 0;
-N = ${N};
+    int i = 0;
+    int N = ${N};
 
-while (i < N) {
-  print(42);
-  i = i + 1;
+    while (i < N) {
+      print(42);
+      i = i + 1;
+    }
+
+    print("AbyssLang benchmark end");
 }
-
-print_show("AbyssLang benchmark end\n");
 AL
 
 # --- Compile AbyssLang Source ---
@@ -35,34 +35,41 @@ echo "Compiling sample.al..."
 echo "Generating Python test script..."
 cat > test.py <<PY
 import sys
-w = sys.stdout.write
-N = ${N}
-w("Python benchmark start\n")
-for i in range(N):
-    w("42\n")
-w("Python benchmark end\n")
+import time
+
+def main():
+    w = sys.stdout.write
+    N = ${N}
+    w("Python benchmark start\n")
+    for i in range(N):
+        w("42\n")
+    w("Python benchmark end\n")
+
+if __name__ == "__main__":
+    main()
 PY
 
 # --- Run Performance Timings ---
 echo
 echo "======================================================="
-echo "  THE BATTLE OF 10 MILLION ITERATIONS (FAIR FIGHT)"
+echo "  THE BATTLE OF 10 MILLION ITERATIONS"
 echo "======================================================="
 
 echo
 echo "--- AbyssLang (VM) Performance ---"
-/usr/bin/time -v ./abyss_vm sample.aby > /dev/null
+# We use /usr/bin/time -v to get detailed stats including memory
+if [ -f /usr/bin/time ]; then
+    /usr/bin/time -v ./abyss_vm sample.aby > /dev/null
+else
+    time ./abyss_vm sample.aby > /dev/null
+fi
 
 echo
 echo "--- Python 3 Performance ---"
-/usr/bin/time -v python3 test.py > /dev/null
-
-# --- Advanced Benchmarking ---
-if command -v hyperfine >/dev/null 2>&1; then
-  echo
-  echo "--- Hyperfine Comparative Benchmark ---"
-  # 10M is heavy, so we do fewer runs
-  hyperfine --warmup 1 --runs 3 "./abyss_vm sample.aby > /dev/null" "python3 test.py > /dev/null"
+if [ -f /usr/bin/time ]; then
+    /usr/bin/time -v python3 test.py > /dev/null
+else
+    time python3 test.py > /dev/null
 fi
 
 echo
