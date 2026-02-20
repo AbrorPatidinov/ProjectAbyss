@@ -1,6 +1,14 @@
 import std.io;
 import std.math;
 
+struct Person {
+    str firstname;
+    str lastname;
+    int age;
+    float weight;
+    float height;
+}
+
 void main() {
     std.io.println("--- Standard Library Test ---");
 
@@ -14,4 +22,18 @@ void main() {
     int p = std.math.pow(2, 10);
     std.io.println("2 power 10 is:");
     std.io.print_int(p);
+
+    std.io.println("");
+
+    Person person = new(Person);
+    person.firstname = "Abrorbek";
+    person.lastname = "Patidinov";
+    person.age = 19;
+
+    std.io.println("Person's firstname: %{str}", person.firstname);
+    std.io.println("Person's lastname: %{str}", person.lastname);
+    std.io.println("Person's age: %{int}", person.age);
+
+
+    abyss_eye();
 }

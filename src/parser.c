@@ -179,7 +179,7 @@ DataType factor(int *struct_id, int *array_depth) {
     char *name = strdup(cur.text);
     next();
 
-    // --- NAMESPACE RESOLUTION LOGIC (EXPRESSIONS) ---
+    // --- NAMESPACE RESOLUTION LOGIC ---
     int lid = find_local(name);
     int gid = find_global(name);
 
@@ -211,6 +211,9 @@ DataType factor(int *struct_id, int *array_depth) {
         ret = TYPE_VOID;
       } else if (!strcmp(name, "__bridge_print_int")) {
         nid = 11;
+        ret = TYPE_VOID;
+      } else if (!strcmp(name, "__bridge_print_float")) {
+        nid = 12;
         ret = TYPE_VOID;
       } else if (!strcmp(name, "__bridge_pow")) {
         nid = 20;
@@ -304,6 +307,7 @@ DataType factor(int *struct_id, int *array_depth) {
           expression(&d1, &d2);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         } else if (cur.kind == TK_PLUS_ASSIGN) {
@@ -319,6 +323,7 @@ DataType factor(int *struct_id, int *array_depth) {
             emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         } else if (cur.kind == TK_MINUS_ASSIGN) {
@@ -334,6 +339,7 @@ DataType factor(int *struct_id, int *array_depth) {
             emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         } else if (cur.kind == TK_INC) {
@@ -346,6 +352,7 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         } else if (cur.kind == TK_DEC) {
@@ -358,6 +365,7 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         }
@@ -372,16 +380,19 @@ DataType factor(int *struct_id, int *array_depth) {
           int d1, d2;
           expression(&d1, &d2);
           emit(OP_SET_INDEX);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         } else if (cur.kind == TK_INC) {
           next();
           emit(OP_INC_INDEX);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         } else if (cur.kind == TK_DEC) {
           next();
           emit(OP_DEC_INDEX);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return t;
         }
@@ -390,10 +401,12 @@ DataType factor(int *struct_id, int *array_depth) {
       } else
         break;
     }
+
     if (accept(TK_ASSIGN)) {
       emit(OP_POP);
       int d1, d2;
       expression(&d1, &d2);
+      expect(TK_SEMI);
       if (lid != -1) {
         emit(OP_SET_LOCAL);
         emit(locals[lid].offset);
@@ -414,6 +427,7 @@ DataType factor(int *struct_id, int *array_depth) {
         emit(OP_SET_GLOBAL);
         emit(gid);
       }
+      expect(TK_SEMI);
       free(name);
       return t;
     } else if (accept(TK_DEC)) {
@@ -427,6 +441,7 @@ DataType factor(int *struct_id, int *array_depth) {
         emit(OP_SET_GLOBAL);
         emit(gid);
       }
+      expect(TK_SEMI);
       free(name);
       return t;
     } else if (accept(TK_PLUS_ASSIGN)) {
@@ -440,6 +455,7 @@ DataType factor(int *struct_id, int *array_depth) {
         emit(OP_SET_GLOBAL);
         emit(gid);
       }
+      expect(TK_SEMI);
       free(name);
       return t;
     } else if (accept(TK_MINUS_ASSIGN)) {
@@ -453,6 +469,7 @@ DataType factor(int *struct_id, int *array_depth) {
         emit(OP_SET_GLOBAL);
         emit(gid);
       }
+      expect(TK_SEMI);
       free(name);
       return t;
     }
@@ -1131,6 +1148,7 @@ void statement() {
           expression(&d1, &d2);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         } else if (cur.kind == TK_PLUS_ASSIGN) {
@@ -1146,6 +1164,7 @@ void statement() {
             emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         } else if (cur.kind == TK_MINUS_ASSIGN) {
@@ -1161,6 +1180,7 @@ void statement() {
             emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         } else if (cur.kind == TK_INC) {
@@ -1173,6 +1193,7 @@ void statement() {
           emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         } else if (cur.kind == TK_DEC) {
@@ -1185,6 +1206,7 @@ void statement() {
           emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         }
@@ -1199,16 +1221,19 @@ void statement() {
           int d1, d2;
           expression(&d1, &d2);
           emit(OP_SET_INDEX);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         } else if (cur.kind == TK_INC) {
           next();
           emit(OP_INC_INDEX);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         } else if (cur.kind == TK_DEC) {
           next();
           emit(OP_DEC_INDEX);
+          expect(TK_SEMI); // <--- ADDED
           free(name);
           return;
         }
