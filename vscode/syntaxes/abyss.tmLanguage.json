@@ -1,11 +1,49 @@
 {
   "scopeName": "source.abyss",
+  "name": "AbyssLang",
   "patterns": [
-    { "name": "comment.line.double-slash.abyss", "match": "//.*$" },
-    { "name": "string.quoted.double.abyss", "begin": "\"", "end": "\"", "patterns": [{"name":"constant.character.escape.abyss","match":"\\\\."}] },
-    { "name": "constant.numeric.integer.abyss", "match": "\\b\\d+\\b" },
-    { "name": "keyword.control.abyss", "match": "\\b(print|print_show)\\b" },
-    { "name": "variable.other.abyss", "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b" }
-  ],
-  "repository": {}
+    {
+      "name": "comment.line.double-slash.abyss",
+      "match": "//.*$"
+    },
+    {
+      "name": "string.quoted.double.abyss",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.abyss",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "keyword.control.abyss",
+      "match": "\\b(if|else|while|for|return|break|continue|try|catch|throw|import)\\b"
+    },
+    {
+      "name": "keyword.declaration.abyss",
+      "match": "\\b(function|struct|new|free|stack)\\b"
+    },
+    {
+      "name": "storage.type.abyss",
+      "match": "\\b(int|float|char|void|str)\\b"
+    },
+    {
+      "name": "support.function.abyss",
+      "match": "\\b(print|print_show|abyss_eye)\\b"
+    },
+    {
+      "name": "keyword.operator.comparison.abyss",
+      "match": "==|!=|<=|>=|\\+\\+|--|\\+=|-=|&&|\\|\\|"
+    },
+    {
+      "name": "keyword.operator.arithmetic.abyss",
+      "match": "[+\\-*/%]"
+    },
+    {
+      "name": "variable.other.abyss",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+    }
+  ]
 }

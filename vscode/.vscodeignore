@@ -1,0 +1,7 @@
+# Ignore unnecessary files
+.gitignore
+.vscodeignore
+node_modules
+*.log
+*.vsix
+settings.json

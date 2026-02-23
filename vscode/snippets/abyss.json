@@ -1,21 +1,31 @@
 {
-  "print_show": {
-    "prefix": "ps",
-    "body": ["print_show(\"$1\");"],
-    "description": "Fast print_show snippet"
+  "Function": {
+    "prefix": "func",
+    "body": ["function ${1:name}() {", "    $0", "}"],
+    "description": "Create a function"
   },
-  "print": {
-    "prefix": "pr",
-    "body": ["print($1);"],
-    "description": "Print expression"
+  "If Statement": {
+    "prefix": "if",
+    "body": ["if (${1:condition}) {", "    $0", "}"],
+    "description": "If statement"
   },
-  "while": {
-    "prefix": "wh",
+  "For Loop": {
+    "prefix": "for",
     "body": [
-      "while ($1) {",
-      "\t$2",
+      "for (${1:init}; ${2:condition}; ${3:increment}) {",
+      "    $0",
       "}"
     ],
+    "description": "For loop"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": ["while (${1:condition}) {", "    $0", "}"],
     "description": "While loop"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:Name} {", "    $0", "}"],
+    "description": "Define struct"
   }
 }

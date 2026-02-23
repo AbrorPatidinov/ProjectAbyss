@@ -1,28 +1,57 @@
 {
   "name": "abysslang",
   "displayName": "AbyssLang",
-  "description": "AbyssLang language support (syntax highlighting + snippets)",
-  "version": "0.0.1",
-  "engines": { "vscode": "^1.60.0" },
-  "categories": ["languages"],
+  "description": "Official VSCode support for AbyssLang programming language.",
+  "version": "0.1.0",
+  "publisher": "abrorpatidinov",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AbrorPatidinov/ProjectAbyss"
+  },
+  "homepage": "https://github.com/AbrorPatidinov/ProjectAbyss",
+  "bugs": {
+    "url": "https://github.com/AbrorPatidinov/ProjectAbyss/issues"
+  },
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "abyss",
+    "abysslang",
+    "programming language",
+    "compiler",
+    "vm"
+  ],
   "contributes": {
     "languages": [
       {
-        "id": "abysslang",
-        "aliases": ["AbyssLang", "abysslang"],
-        "extensions": [".al"],
+        "id": "abyss",
+        "aliases": [
+          "AbyssLang",
+          "abyss"
+        ],
+        "extensions": [
+          ".al"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "abysslang",
+        "language": "abyss",
         "scopeName": "source.abyss",
         "path": "./syntaxes/abyss.tmLanguage.json"
       }
     ],
     "snippets": [
-      { "language": "abysslang", "path": "./snippets/abyss.json" }
+      {
+        "language": "abyss",
+        "path": "./snippets/abyss.json"
+      }
     ]
   }
 }

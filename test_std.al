@@ -1,6 +1,7 @@
 import std.io;
 import std.math;
 
+
 struct Person {
     str firstname;
     str lastname;
