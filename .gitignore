@@ -2,3 +2,25 @@
 .vscode/
 .vscode-dev/
 *.log
+
+# C build artifacts
+*.o
+*.out
+*.a
+*.so
+*.exe
+
+# Compiled language outputs
+*.aby
+
+# Binaries
+abyssc
+abyss_vm
+
+# Rust
+std_rust/target/
+Cargo.lock
+
+# OS
+.DS_Store
+Thumbs.db
