@@ -15,7 +15,6 @@ void generate_native_code(const char *out_filename) {
 
   // --- 1. C HEADERS & VM STATE ---
   fprintf(f, "#define _POSIX_C_SOURCE 200809L\n");
-  fprintf(f, "#include \"include/bridge.h\"\n");
   fprintf(
       f,
       "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include "
@@ -511,17 +510,6 @@ void generate_native_code(const char *out_filename) {
       else if (nid == 1)
         fprintf(f, "  { char buf[64]; int64_t v=0; if(fgets(buf, sizeof(buf), "
                    "stdin)) v = atoll(buf); stack[sp++].i = v; }\n");
-      else if (nid == 10)
-        fprintf(f, "  abyss_io_print_str(stack[--sp].p);\n");
-      else if (nid == 11)
-        fprintf(f, "  abyss_io_print_int(stack[--sp].i);\n");
-      else if (nid == 12)
-        fprintf(f, "  abyss_io_print_float(stack[--sp].f);\n");
-      else if (nid == 20)
-        fprintf(f, "  { int64_t e = stack[--sp].i; int64_t b = stack[--sp].i; "
-                   "stack[sp++].i = abyss_math_pow(b, e); }\n");
-      else if (nid == 21)
-        fprintf(f, "  { stack[sp-1].i = abyss_math_abs(stack[sp-1].i); }\n");
       break;
     }
     case OP_TAG_ALLOC: {

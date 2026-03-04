@@ -23,7 +23,7 @@
     },
     {
       "name": "keyword.declaration.abyss",
-      "match": "\\b(function|struct|new|free|stack)\\b"
+      "match": "\\b(function|struct|enum|interface|new|free|stack)\\b"
     },
     {
       "name": "storage.type.abyss",
@@ -35,11 +35,11 @@
     },
     {
       "name": "keyword.operator.comparison.abyss",
-      "match": "==|!=|<=|>=|\\+\\+|--|\\+=|-=|&&|\\|\\|"
+      "match": "==|!=|<=|>=|\\+\\+|--|\\+=|-=|&&|\\|\\||<<|>>"
     },
     {
       "name": "keyword.operator.arithmetic.abyss",
-      "match": "[+\\-*/%]"
+      "match": "[+\\-*/%&|^~!]"
     },
     {
       "name": "variable.other.abyss",

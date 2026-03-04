@@ -2,7 +2,7 @@
   "name": "abysslang",
   "displayName": "AbyssLang",
   "description": "Official VSCode support for AbyssLang programming language.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "abrorpatidinov",
   "license": "Apache-2.0",
   "repository": {

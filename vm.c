@@ -1,5 +1,4 @@
 #define _POSIX_C_SOURCE 200809L
-#include "include/bridge.h"
 #include "include/common.h"
 #include <ctype.h>
 #include <stdint.h>
@@ -889,7 +888,8 @@ L_OP_THROW: {
   DISPATCH();
 }
 
-L_OP_NATIVE: {
+L_OP_NATIVE:
+{
   uint32_t nid;
   memcpy(&nid, code + ip, 4);
   ip += 4;
@@ -900,31 +900,14 @@ L_OP_NATIVE: {
     int64_t v;
     memcpy(&v, &t, 8);
     push(v);
-  } else if (nid == 1) { // input_int
+  }
+  else if (nid == 1) { // input_int
     char buf[64];
     int64_t v = 0;
     if (fgets(buf, sizeof(buf), stdin))
       v = atoll(buf);
     push(v);
   }
-  // --- BRIDGE CALLS ---
-  else if (nid == 10) {
-    abyss_io_print_str((char *)pop());
-  } else if (nid == 11) {
-    abyss_io_print_int(pop());
-  } else if (nid == 12) {
-    int64_t iv = pop();
-    double v;
-    memcpy(&v, &iv, 8);
-    abyss_io_print_float(v);
-  } else if (nid == 20) {
-    int64_t exp = pop();
-    int64_t base = pop();
-    push(abyss_math_pow(base, exp));
-  } else if (nid == 21) {
-    push(abyss_math_abs(pop()));
-  }
-
   DISPATCH();
 }
 L_OP_DUP: {

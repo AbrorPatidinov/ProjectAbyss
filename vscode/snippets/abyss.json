@@ -27,5 +27,19 @@
     "prefix": "struct",
     "body": ["struct ${1:Name} {", "    $0", "}"],
     "description": "Define struct"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} {", "    ${2:VALUE1},", "    ${3:VALUE2}", "}"],
+    "description": "Define an enum"
+  },
+  "Interface": {
+    "prefix": "interface",
+    "body": [
+      "interface ${1:Name} {",
+      "    function ${2:method_name}(${3:args}) : (${4:ret});",
+      "}"
+    ],
+    "description": "Define an interface"
   }
 }

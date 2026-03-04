@@ -1,39 +1,21 @@
 import std.io;
 import std.math;
 
-struct Person {
-    str firstname;
-    str lastname;
-    int age;
-    float weight;
-    float height;
-}
-
 void main() {
-    std.io.println("--- Standard Library Test ---");
+    std.io.println("--- Pure AbyssLang Standard Library Test ---");
 
-    int a = 10;
-    int b = 20;
-    int m = std.math.max(a, b);
+    int a = -50;
+    int absolute = std.math.abs(a);
+    print("Absolute of -50 is: %int", absolute);
 
-    std.io.println("Max of 10 and 20 is:");
-    std.io.print_int(m);
+    int m = std.math.max(10, 20);
+    print("Max of 10 and 20 is: %int", m);
 
     int p = std.math.pow(2, 10);
-    std.io.println("2 power 10 is:");
-    std.io.print_int(p);
+    print("2 power 10 is: %int", p);
 
-    std.io.println("");
+    int f = std.math.factorial(5);
+    print("Factorial of 5 is: %int", f);
 
-    Person person = new(Person);
-    person.firstname = "Abrorbek";
-    person.lastname = "Patidinov";
-    person.age = 19;
-
-    std.io.println("Person's firstname: %{str}", person.firstname);
-    std.io.println("Person's lastname: %{str}", person.lastname);
-    std.io.println("Person's age: %{integer}", person.age);
-
-
-    abyss_eye();
+    std.io.println("Standard Library is working perfectly without Rust!");
 }

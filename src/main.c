@@ -70,10 +70,9 @@ int main(int argc, char **argv) {
 
     char cmd[1024];
     snprintf(cmd, sizeof(cmd),
-             "gcc -O3 -flto -march=native -fno-strict-aliasing -Wall "
+             "gcc -O3 -flto=auto -march=native -fno-strict-aliasing -Wall "
              "-Wno-unused-variable -Wno-unused-label -D_POSIX_C_SOURCE=200809L "
-             "-o %s abyss_native_temp.c std_rust/target/release/libabyss_std.a "
-             "-lpthread -ldl -lm",
+             "-o %s abyss_native_temp.c -lm",
              out_file);
     printf("🔨 Compiling Native Binary: %s\n", out_file);
     int res = system(cmd);
