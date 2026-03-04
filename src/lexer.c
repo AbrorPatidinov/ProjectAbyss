@@ -340,6 +340,30 @@ void next() {
     cur.kind = TK_MINUS_ASSIGN;
     return;
   }
+  if (!strncmp(src + pos, "&&", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_AND;
+    return;
+  }
+  if (!strncmp(src + pos, "||", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_OR;
+    return;
+  }
+  if (!strncmp(src + pos, "<<", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_SHL;
+    return;
+  }
+  if (!strncmp(src + pos, ">>", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_SHR;
+    return;
+  }
 
   char c = src[pos++];
   col++;
@@ -404,6 +428,21 @@ void next() {
     break;
   case '?':
     cur.kind = TK_QUESTION;
+    break;
+  case '!':
+    cur.kind = TK_NOT;
+    break;
+  case '&':
+    cur.kind = TK_BIT_AND;
+    break;
+  case '|':
+    cur.kind = TK_BIT_OR;
+    break;
+  case '^':
+    cur.kind = TK_BIT_XOR;
+    break;
+  case '~':
+    cur.kind = TK_BIT_NOT;
     break;
   default:
     fail("Unknown char '%c'", c);

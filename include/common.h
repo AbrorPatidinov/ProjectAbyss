@@ -39,8 +39,11 @@ enum {
     OP_INC_INDEX,
     OP_DEC_INDEX,
     OP_CALL_DYN_BOT,
-    // --- NEW OPCODE ---
-    OP_TAG_ALLOC // Tags the allocation on top of the stack with a variable name
+    OP_TAG_ALLOC,
+    // --- NEW OPCODES ---
+    OP_AND, OP_OR, OP_NOT,
+    OP_BIT_AND, OP_BIT_OR, OP_BIT_XOR, OP_SHL, OP_SHR, OP_BIT_NOT,
+    OP_STR_CAT
 };
 
 #endif

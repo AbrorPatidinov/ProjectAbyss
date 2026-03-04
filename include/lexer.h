@@ -18,7 +18,10 @@ typedef enum {
     TK_QUESTION, TK_STACK,
     TK_BREAK, TK_CONTINUE,
     TK_IMPORT,
-    TK_ENUM, TK_INTERFACE
+    TK_ENUM, TK_INTERFACE,
+    // --- NEW TOKENS ---
+    TK_AND, TK_OR, TK_NOT,
+    TK_BIT_AND, TK_BIT_OR, TK_BIT_XOR, TK_SHL, TK_SHR, TK_BIT_NOT
 } TkKind;
 
 typedef struct {

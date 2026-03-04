@@ -251,8 +251,9 @@ void abyss_eye() {
   while (curr) {
     if (!curr->is_freed) {
       const char *icon = curr->is_stack ? "⚡" : "💎";
-      const char *type_name = (curr->struct_id == 0xFFFFFFFF)
-                                  ? "Array"
+      const char *type_name = (curr->struct_id == 0xFFFFFFFF) ? "Array"
+                              : (curr->struct_id == 0xFFFFFFFE)
+                                  ? "DynString"
                                   : structs[curr->struct_id].name;
       const char *tag_name = curr->tag ? curr->tag : "-";
       const char *lifetime = curr->is_stack ? "Stack" : "Heap";
@@ -342,8 +343,9 @@ void abyss_eye() {
   }
 
   while (curr) {
-    const char *type_name = (curr->struct_id == 0xFFFFFFFF)
-                                ? "Array"
+    const char *type_name = (curr->struct_id == 0xFFFFFFFF) ? "Array"
+                            : (curr->struct_id == 0xFFFFFFFE)
+                                ? "DynString"
                                 : structs[curr->struct_id].name;
     const char *tag_name = curr->tag ? curr->tag : "-";
     const char *lifetime = curr->is_stack ? "Stack" : "Heap";
@@ -422,65 +424,77 @@ int main(int argc, char **argv) {
   fread(code, 1, code_size, f);
   fclose(f);
 
-  static void *dispatch_table[] = {[OP_HALT] = &&L_OP_HALT,
-                                   [OP_CONST_INT] = &&L_OP_CONST_INT,
-                                   [OP_CONST_FLOAT] = &&L_OP_CONST_FLOAT,
-                                   [OP_CONST_STR] = &&L_OP_CONST_STR,
-                                   [OP_ADD] = &&L_OP_ADD,
-                                   [OP_SUB] = &&L_OP_SUB,
-                                   [OP_MUL] = &&L_OP_MUL,
-                                   [OP_DIV] = &&L_OP_DIV,
-                                   [OP_ADD_F] = &&L_OP_ADD_F,
-                                   [OP_SUB_F] = &&L_OP_SUB_F,
-                                   [OP_MUL_F] = &&L_OP_MUL_F,
-                                   [OP_DIV_F] = &&L_OP_DIV_F,
-                                   [OP_LT] = &&L_OP_LT,
-                                   [OP_LE] = &&L_OP_LE,
-                                   [OP_GT] = &&L_OP_GT,
-                                   [OP_GE] = &&L_OP_GE,
-                                   [OP_EQ] = &&L_OP_EQ,
-                                   [OP_NE] = &&L_OP_NE,
-                                   [OP_LT_F] = &&L_OP_LT_F,
-                                   [OP_LE_F] = &&L_OP_LE_F,
-                                   [OP_GT_F] = &&L_OP_GT_F,
-                                   [OP_GE_F] = &&L_OP_GE_F,
-                                   [OP_EQ_F] = &&L_OP_EQ_F,
-                                   [OP_NE_F] = &&L_OP_NE_F,
-                                   [OP_JMP] = &&L_OP_JMP,
-                                   [OP_JZ] = &&L_OP_JZ,
-                                   [OP_PRINT] = &&L_OP_PRINT,
-                                   [OP_PRINT_F] = &&L_OP_PRINT_F,
-                                   [OP_PRINT_STR] = &&L_OP_PRINT_STR,
-                                   [OP_PRINT_CHAR] = &&L_OP_PRINT_CHAR,
-                                   [OP_GET_GLOBAL] = &&L_OP_GET_GLOBAL,
-                                   [OP_SET_GLOBAL] = &&L_OP_SET_GLOBAL,
-                                   [OP_GET_LOCAL] = &&L_OP_GET_LOCAL,
-                                   [OP_SET_LOCAL] = &&L_OP_SET_LOCAL,
-                                   [OP_CALL] = &&L_OP_CALL,
-                                   [OP_RET] = &&L_OP_RET,
-                                   [OP_POP] = &&L_OP_POP,
-                                   [OP_ALLOC_STRUCT] = &&L_OP_ALLOC_STRUCT,
-                                   [OP_ALLOC_ARRAY] = &&L_OP_ALLOC_ARRAY,
-                                   [OP_FREE] = &&L_OP_FREE,
-                                   [OP_GET_FIELD] = &&L_OP_GET_FIELD,
-                                   [OP_SET_FIELD] = &&L_OP_SET_FIELD,
-                                   [OP_GET_INDEX] = &&L_OP_GET_INDEX,
-                                   [OP_SET_INDEX] = &&L_OP_SET_INDEX,
-                                   [OP_ABYSS_EYE] = &&L_OP_ABYSS_EYE,
-                                   [OP_MOD] = &&L_OP_MOD,
-                                   [OP_NEG] = &&L_OP_NEG,
-                                   [OP_NEG_F] = &&L_OP_NEG_F,
-                                   [OP_PRINT_FMT] = &&L_OP_PRINT_FMT,
-                                   [OP_TRY] = &&L_OP_TRY,
-                                   [OP_END_TRY] = &&L_OP_END_TRY,
-                                   [OP_THROW] = &&L_OP_THROW,
-                                   [OP_NATIVE] = &&L_OP_NATIVE,
-                                   [OP_DUP] = &&L_OP_DUP,
-                                   [OP_ALLOC_STACK] = &&L_OP_ALLOC_STACK,
-                                   [OP_INC_INDEX] = &&L_OP_INC_INDEX,
-                                   [OP_DEC_INDEX] = &&L_OP_DEC_INDEX,
-                                   [OP_CALL_DYN_BOT] = &&L_OP_CALL_DYN_BOT,
-                                   [OP_TAG_ALLOC] = &&L_OP_TAG_ALLOC};
+  static void *dispatch_table[] = {
+      [OP_HALT] = &&L_OP_HALT,
+      [OP_CONST_INT] = &&L_OP_CONST_INT,
+      [OP_CONST_FLOAT] = &&L_OP_CONST_FLOAT,
+      [OP_CONST_STR] = &&L_OP_CONST_STR,
+      [OP_ADD] = &&L_OP_ADD,
+      [OP_SUB] = &&L_OP_SUB,
+      [OP_MUL] = &&L_OP_MUL,
+      [OP_DIV] = &&L_OP_DIV,
+      [OP_ADD_F] = &&L_OP_ADD_F,
+      [OP_SUB_F] = &&L_OP_SUB_F,
+      [OP_MUL_F] = &&L_OP_MUL_F,
+      [OP_DIV_F] = &&L_OP_DIV_F,
+      [OP_LT] = &&L_OP_LT,
+      [OP_LE] = &&L_OP_LE,
+      [OP_GT] = &&L_OP_GT,
+      [OP_GE] = &&L_OP_GE,
+      [OP_EQ] = &&L_OP_EQ,
+      [OP_NE] = &&L_OP_NE,
+      [OP_LT_F] = &&L_OP_LT_F,
+      [OP_LE_F] = &&L_OP_LE_F,
+      [OP_GT_F] = &&L_OP_GT_F,
+      [OP_GE_F] = &&L_OP_GE_F,
+      [OP_EQ_F] = &&L_OP_EQ_F,
+      [OP_NE_F] = &&L_OP_NE_F,
+      [OP_JMP] = &&L_OP_JMP,
+      [OP_JZ] = &&L_OP_JZ,
+      [OP_PRINT] = &&L_OP_PRINT,
+      [OP_PRINT_F] = &&L_OP_PRINT_F,
+      [OP_PRINT_STR] = &&L_OP_PRINT_STR,
+      [OP_PRINT_CHAR] = &&L_OP_PRINT_CHAR,
+      [OP_GET_GLOBAL] = &&L_OP_GET_GLOBAL,
+      [OP_SET_GLOBAL] = &&L_OP_SET_GLOBAL,
+      [OP_GET_LOCAL] = &&L_OP_GET_LOCAL,
+      [OP_SET_LOCAL] = &&L_OP_SET_LOCAL,
+      [OP_CALL] = &&L_OP_CALL,
+      [OP_RET] = &&L_OP_RET,
+      [OP_POP] = &&L_OP_POP,
+      [OP_ALLOC_STRUCT] = &&L_OP_ALLOC_STRUCT,
+      [OP_ALLOC_ARRAY] = &&L_OP_ALLOC_ARRAY,
+      [OP_FREE] = &&L_OP_FREE,
+      [OP_GET_FIELD] = &&L_OP_GET_FIELD,
+      [OP_SET_FIELD] = &&L_OP_SET_FIELD,
+      [OP_GET_INDEX] = &&L_OP_GET_INDEX,
+      [OP_SET_INDEX] = &&L_OP_SET_INDEX,
+      [OP_ABYSS_EYE] = &&L_OP_ABYSS_EYE,
+      [OP_MOD] = &&L_OP_MOD,
+      [OP_NEG] = &&L_OP_NEG,
+      [OP_NEG_F] = &&L_OP_NEG_F,
+      [OP_PRINT_FMT] = &&L_OP_PRINT_FMT,
+      [OP_TRY] = &&L_OP_TRY,
+      [OP_END_TRY] = &&L_OP_END_TRY,
+      [OP_THROW] = &&L_OP_THROW,
+      [OP_NATIVE] = &&L_OP_NATIVE,
+      [OP_DUP] = &&L_OP_DUP,
+      [OP_ALLOC_STACK] = &&L_OP_ALLOC_STACK,
+      [OP_INC_INDEX] = &&L_OP_INC_INDEX,
+      [OP_DEC_INDEX] = &&L_OP_DEC_INDEX,
+      [OP_CALL_DYN_BOT] = &&L_OP_CALL_DYN_BOT,
+      [OP_TAG_ALLOC] = &&L_OP_TAG_ALLOC,
+      [OP_AND] = &&L_OP_AND,
+      [OP_OR] = &&L_OP_OR,
+      [OP_NOT] = &&L_OP_NOT,
+      [OP_BIT_AND] = &&L_OP_BIT_AND,
+      [OP_BIT_OR] = &&L_OP_BIT_OR,
+      [OP_BIT_XOR] = &&L_OP_BIT_XOR,
+      [OP_SHL] = &&L_OP_SHL,
+      [OP_SHR] = &&L_OP_SHR,
+      [OP_BIT_NOT] = &&L_OP_BIT_NOT,
+      [OP_STR_CAT] = &&L_OP_STR_CAT,
+  };
 
 #define DISPATCH() goto *dispatch_table[code[ip++]]
 
@@ -975,6 +989,63 @@ L_OP_TAG_ALLOC: {
     }
     curr = curr->next;
   }
+  DISPATCH();
+}
+L_OP_AND: {
+  stack[sp - 2] = stack[sp - 2] && stack[sp - 1];
+  sp--;
+  DISPATCH();
+}
+L_OP_OR: {
+  stack[sp - 2] = stack[sp - 2] || stack[sp - 1];
+  sp--;
+  DISPATCH();
+}
+L_OP_NOT: {
+  stack[sp - 1] = !stack[sp - 1];
+  DISPATCH();
+}
+L_OP_BIT_AND: {
+  stack[sp - 2] &= stack[sp - 1];
+  sp--;
+  DISPATCH();
+}
+L_OP_BIT_OR: {
+  stack[sp - 2] |= stack[sp - 1];
+  sp--;
+  DISPATCH();
+}
+L_OP_BIT_XOR: {
+  stack[sp - 2] ^= stack[sp - 1];
+  sp--;
+  DISPATCH();
+}
+L_OP_SHL: {
+  stack[sp - 2] <<= stack[sp - 1];
+  sp--;
+  DISPATCH();
+}
+L_OP_SHR: {
+  stack[sp - 2] >>= stack[sp - 1];
+  sp--;
+  DISPATCH();
+}
+L_OP_BIT_NOT: {
+  stack[sp - 1] = ~stack[sp - 1];
+  DISPATCH();
+}
+L_OP_STR_CAT: {
+  char *s2 = (char *)pop();
+  char *s1 = (char *)pop();
+  size_t len1 = strlen(s1);
+  size_t len2 = strlen(s2);
+  char *new_str = malloc(len1 + len2 + 1);
+  strcpy(new_str, s1);
+  strcat(new_str, s2);
+
+  // 0xFFFFFFFE is our special ID for Dynamic Strings in Abyss Eye
+  track_alloc(new_str, 0xFFFFFFFE, len1 + len2 + 1, 0, "Dynamic String Concat");
+  push((int64_t)new_str);
   DISPATCH();
 }
 

@@ -9,6 +9,9 @@
 
 // --- FORWARD DECLARATIONS ---
 DataType expression(int *struct_id, int *array_depth);
+// --- NEW PRECEDENCE ENGINE ---
+DataType factor(int *struct_id, int *array_depth);
+
 void statement();
 void parse_struct();
 void parse_func();
@@ -148,7 +151,8 @@ DataType factor(int *struct_id, int *array_depth) {
 
     int comment_idx = 0xFFFFFFFF; // Default: No comment
     if (accept(TK_COMMA)) {
-      if (cur.kind != TK_STR) fail("Expected string comment for memory allocation");
+      if (cur.kind != TK_STR)
+        fail("Expected string comment for memory allocation");
       comment_idx = add_str(cur.text);
       next();
     }
@@ -178,7 +182,8 @@ DataType factor(int *struct_id, int *array_depth) {
         comment_idx = add_str(cur.text);
         next();
         expect(TK_RPAREN);
-        if (t != TYPE_STRUCT) fail("new() expects struct");
+        if (t != TYPE_STRUCT)
+          fail("new() expects struct");
         emit(OP_ALLOC_STRUCT);
         emit32(sid);
         emit32(comment_idx);
@@ -188,10 +193,12 @@ DataType factor(int *struct_id, int *array_depth) {
         // new(Type, size) OR new(Type, size, "comment")
         int d1, d2;
         DataType size_t = expression(&d1, &d2);
-        if (size_t != TYPE_INT) fail("Array size must be int");
+        if (size_t != TYPE_INT)
+          fail("Array size must be int");
 
         if (accept(TK_COMMA)) {
-          if (cur.kind != TK_STR) fail("Expected string comment for array allocation");
+          if (cur.kind != TK_STR)
+            fail("Expected string comment for array allocation");
           comment_idx = add_str(cur.text);
           next();
         }
@@ -206,7 +213,8 @@ DataType factor(int *struct_id, int *array_depth) {
       }
     } else {
       expect(TK_RPAREN);
-      if (t != TYPE_STRUCT) fail("new() expects struct");
+      if (t != TYPE_STRUCT)
+        fail("new() expects struct");
       emit(OP_ALLOC_STRUCT);
       emit32(sid);
       emit32(comment_idx);
@@ -583,13 +591,37 @@ DataType factor(int *struct_id, int *array_depth) {
   return TYPE_VOID;
 }
 
+DataType unary(int *struct_id, int *array_depth) {
+  if (accept(TK_MINUS)) {
+    DataType t = unary(struct_id, array_depth);
+    if (t == TYPE_INT)
+      emit(OP_NEG);
+    else if (t == TYPE_FLOAT)
+      emit(OP_NEG_F);
+    else
+      fail("Cannot negate type %d", t);
+    return t;
+  }
+  if (accept(TK_NOT)) {
+    unary(struct_id, array_depth);
+    emit(OP_NOT);
+    return TYPE_INT;
+  }
+  if (accept(TK_BIT_NOT)) {
+    unary(struct_id, array_depth);
+    emit(OP_BIT_NOT);
+    return TYPE_INT;
+  }
+  return factor(struct_id, array_depth);
+}
+
 DataType term(int *struct_id, int *array_depth) {
-  DataType t = factor(struct_id, array_depth);
+  DataType t = unary(struct_id, array_depth);
   while (cur.kind == TK_MUL || cur.kind == TK_DIV || cur.kind == TK_MOD) {
     int op = cur.kind;
     next();
     int d1, d2;
-    DataType t2 = factor(&d1, &d2);
+    DataType t2 = unary(&d1, &d2);
     if (op == TK_MOD)
       emit(OP_MOD);
     else if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
@@ -608,7 +640,12 @@ DataType add_expr(int *struct_id, int *array_depth) {
     next();
     int d1, d2;
     DataType t2 = term(&d1, &d2);
-    if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+
+    // Dynamic String Concatenation!
+    if (op == TK_PLUS && t == TYPE_STR && t2 == TYPE_STR) {
+      emit(OP_STR_CAT);
+      t = TYPE_STR;
+    } else if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
       emit(op == TK_PLUS ? OP_ADD_F : OP_SUB_F);
       t = TYPE_FLOAT;
     } else
@@ -617,19 +654,28 @@ DataType add_expr(int *struct_id, int *array_depth) {
   return t;
 }
 
-DataType rel_expr(int *struct_id, int *array_depth) {
+DataType shift_expr(int *struct_id, int *array_depth) {
   DataType t = add_expr(struct_id, array_depth);
-  if (cur.kind >= TK_EQ && cur.kind <= TK_GE) {
+  while (cur.kind == TK_SHL || cur.kind == TK_SHR) {
     int op = cur.kind;
     next();
     int d1, d2;
-    DataType t2 = add_expr(&d1, &d2);
+    add_expr(&d1, &d2);
+    emit(op == TK_SHL ? OP_SHL : OP_SHR);
+  }
+  return t;
+}
+
+DataType rel_expr(int *struct_id, int *array_depth) {
+  DataType t = shift_expr(struct_id, array_depth);
+  if (cur.kind == TK_LT || cur.kind == TK_LE || cur.kind == TK_GT ||
+      cur.kind == TK_GE) {
+    int op = cur.kind;
+    next();
+    int d1, d2;
+    DataType t2 = shift_expr(&d1, &d2);
     if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
-      if (op == TK_EQ)
-        emit(OP_EQ_F);
-      else if (op == TK_NE)
-        emit(OP_NE_F);
-      else if (op == TK_LT)
+      if (op == TK_LT)
         emit(OP_LT_F);
       else if (op == TK_LE)
         emit(OP_LE_F);
@@ -638,11 +684,7 @@ DataType rel_expr(int *struct_id, int *array_depth) {
       else if (op == TK_GE)
         emit(OP_GE_F);
     } else {
-      if (op == TK_EQ)
-        emit(OP_EQ);
-      else if (op == TK_NE)
-        emit(OP_NE);
-      else if (op == TK_LT)
+      if (op == TK_LT)
         emit(OP_LT);
       else if (op == TK_LE)
         emit(OP_LE);
@@ -656,8 +698,75 @@ DataType rel_expr(int *struct_id, int *array_depth) {
   return t;
 }
 
-DataType expression(int *struct_id, int *array_depth) {
+DataType equality_expr(int *struct_id, int *array_depth) {
   DataType t = rel_expr(struct_id, array_depth);
+  while (cur.kind == TK_EQ || cur.kind == TK_NE) {
+    int op = cur.kind;
+    next();
+    int d1, d2;
+    DataType t2 = rel_expr(&d1, &d2);
+    if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+      emit(op == TK_EQ ? OP_EQ_F : OP_NE_F);
+    } else {
+      emit(op == TK_EQ ? OP_EQ : OP_NE);
+    }
+    t = TYPE_INT;
+  }
+  return t;
+}
+
+DataType bitwise_and_expr(int *struct_id, int *array_depth) {
+  DataType t = equality_expr(struct_id, array_depth);
+  while (accept(TK_BIT_AND)) {
+    int d1, d2;
+    equality_expr(&d1, &d2);
+    emit(OP_BIT_AND);
+  }
+  return t;
+}
+
+DataType bitwise_xor_expr(int *struct_id, int *array_depth) {
+  DataType t = bitwise_and_expr(struct_id, array_depth);
+  while (accept(TK_BIT_XOR)) {
+    int d1, d2;
+    bitwise_and_expr(&d1, &d2);
+    emit(OP_BIT_XOR);
+  }
+  return t;
+}
+
+DataType bitwise_or_expr(int *struct_id, int *array_depth) {
+  DataType t = bitwise_xor_expr(struct_id, array_depth);
+  while (accept(TK_BIT_OR)) {
+    int d1, d2;
+    bitwise_xor_expr(&d1, &d2);
+    emit(OP_BIT_OR);
+  }
+  return t;
+}
+
+DataType logical_and_expr(int *struct_id, int *array_depth) {
+  DataType t = bitwise_or_expr(struct_id, array_depth);
+  while (accept(TK_AND)) {
+    int d1, d2;
+    bitwise_or_expr(&d1, &d2);
+    emit(OP_AND);
+  }
+  return t;
+}
+
+DataType logical_or_expr(int *struct_id, int *array_depth) {
+  DataType t = logical_and_expr(struct_id, array_depth);
+  while (accept(TK_OR)) {
+    int d1, d2;
+    logical_and_expr(&d1, &d2);
+    emit(OP_OR);
+  }
+  return t;
+}
+
+DataType expression(int *struct_id, int *array_depth) {
+  DataType t = logical_or_expr(struct_id, array_depth);
   if (accept(TK_QUESTION)) {
     emit(OP_JZ);
     size_t patch_else = code_sz;
