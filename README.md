@@ -1,5 +1,3 @@
----
-
 ## 🌌 Overview
 
 AbyssLang is a modern, statically-typed systems programming language designed for raw speed, explicit memory control, and developer visibility. 
