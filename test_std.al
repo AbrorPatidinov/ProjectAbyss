@@ -1,7 +1,6 @@
 import std.io;
 import std.math;
 
-
 struct Person {
     str firstname;
     str lastname;
@@ -33,7 +32,7 @@ void main() {
 
     std.io.println("Person's firstname: %{str}", person.firstname);
     std.io.println("Person's lastname: %{str}", person.lastname);
-    std.io.println("Person's age: %{int}", person.age);
+    std.io.println("Person's age: %{integer}", person.age);
 
 
     abyss_eye();

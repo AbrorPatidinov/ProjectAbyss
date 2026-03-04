@@ -12,6 +12,8 @@ DataType expression(int *struct_id, int *array_depth);
 void statement();
 void parse_struct();
 void parse_func();
+void parse_enum();
+void parse_interface();
 void parse_func_tail(DataType *ret_types, int *ret_sids, int *ret_ads,
                      int ret_count, char *name);
 
@@ -82,9 +84,13 @@ void parse_type(DataType *type, int *struct_id, int *array_depth) {
     *type = TYPE_VOID;
   else if (cur.kind == TK_ID) {
     int sid = find_struct(cur.text);
+    int eid = find_enum(cur.text);
     if (sid != -1) {
       *type = TYPE_STRUCT;
       *struct_id = sid;
+      next();
+    } else if (eid != -1) {
+      *type = TYPE_INT;
       next();
     } else
       fail("Unknown type '%s'", cur.text);
@@ -139,37 +145,71 @@ DataType factor(int *struct_id, int *array_depth) {
     int sid;
     int ad;
     parse_type(&t, &sid, &ad);
+
+    int comment_idx = 0xFFFFFFFF; // Default: No comment
+    if (accept(TK_COMMA)) {
+      if (cur.kind != TK_STR) fail("Expected string comment for memory allocation");
+      comment_idx = add_str(cur.text);
+      next();
+    }
+
     expect(TK_RPAREN);
     if (t != TYPE_STRUCT)
       fail("stack() expects struct");
     emit(OP_ALLOC_STACK);
     emit32(sid);
+    emit32(comment_idx); // Emit comment index
     *struct_id = sid;
     return TYPE_STRUCT;
   }
+
   if (accept(TK_NEW)) {
     expect(TK_LPAREN);
     DataType t;
     int sid;
     int ad;
     parse_type(&t, &sid, &ad);
+
+    int comment_idx = 0xFFFFFFFF;
+
     if (accept(TK_COMMA)) {
-      int d1, d2;
-      DataType size_t = expression(&d1, &d2);
-      if (size_t != TYPE_INT)
-        fail("Array size must be int");
-      expect(TK_RPAREN);
-      emit(OP_ALLOC_ARRAY);
-      emit32(8);
-      *struct_id = sid;
-      *array_depth = ad + 1;
-      return TYPE_ARRAY;
+      if (cur.kind == TK_STR) {
+        // new(Type, "comment")
+        comment_idx = add_str(cur.text);
+        next();
+        expect(TK_RPAREN);
+        if (t != TYPE_STRUCT) fail("new() expects struct");
+        emit(OP_ALLOC_STRUCT);
+        emit32(sid);
+        emit32(comment_idx);
+        *struct_id = sid;
+        return TYPE_STRUCT;
+      } else {
+        // new(Type, size) OR new(Type, size, "comment")
+        int d1, d2;
+        DataType size_t = expression(&d1, &d2);
+        if (size_t != TYPE_INT) fail("Array size must be int");
+
+        if (accept(TK_COMMA)) {
+          if (cur.kind != TK_STR) fail("Expected string comment for array allocation");
+          comment_idx = add_str(cur.text);
+          next();
+        }
+
+        expect(TK_RPAREN);
+        emit(OP_ALLOC_ARRAY);
+        emit32(8);
+        emit32(comment_idx);
+        *struct_id = sid;
+        *array_depth = ad + 1;
+        return TYPE_ARRAY;
+      }
     } else {
       expect(TK_RPAREN);
-      if (t != TYPE_STRUCT)
-        fail("new() expects struct");
+      if (t != TYPE_STRUCT) fail("new() expects struct");
       emit(OP_ALLOC_STRUCT);
       emit32(sid);
+      emit32(comment_idx);
       *struct_id = sid;
       return TYPE_STRUCT;
     }
@@ -178,6 +218,21 @@ DataType factor(int *struct_id, int *array_depth) {
   if (cur.kind == TK_ID) {
     char *name = strdup(cur.text);
     next();
+
+    int eid = find_enum(name);
+    if (eid != -1) {
+      expect(TK_DOT);
+      if (cur.kind != TK_ID)
+        fail("Expected enum value");
+      int val = get_enum_value(eid, cur.text);
+      if (val == -1)
+        fail("Unknown enum value '%s' in enum '%s'", cur.text, name);
+      emit(OP_CONST_INT);
+      emit32(val);
+      next();
+      free(name);
+      return TYPE_INT;
+    }
 
     // --- NAMESPACE RESOLUTION LOGIC ---
     int lid = find_local(name);
@@ -261,8 +316,18 @@ DataType factor(int *struct_id, int *array_depth) {
       return funcs[fid].ret_types[0];
     }
 
-    if (lid == -1 && gid == -1)
+    if (lid == -1 && gid == -1) {
+      int fid = find_func(name);
+      if (fid != -1) {
+        emit(OP_CONST_INT);
+        emit32(funcs[fid].addr);
+        free(name);
+        *struct_id = -1;
+        *array_depth = 0;
+        return TYPE_INT;
+      }
       fail("Undefined variable '%s'", name);
+    }
 
     DataType t = TYPE_VOID;
     int sid = -1;
@@ -301,13 +366,43 @@ DataType factor(int *struct_id, int *array_depth) {
         if (field_idx == -1)
           fail("Unknown field '%s'", cur.text);
         next();
+
+        // --- INTERFACE METHOD CALL ---
+        if (structs[parent_sid].is_interface && cur.kind == TK_LPAREN) {
+          accept(TK_LPAREN);
+          emit(OP_GET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+
+          int args = 0;
+          if (cur.kind != TK_RPAREN) {
+            do {
+              int d1, d2;
+              expression(&d1, &d2);
+              args++;
+            } while (accept(TK_COMMA));
+          }
+          expect(TK_RPAREN);
+
+          if (args != structs[parent_sid].fields[field_idx].arg_count)
+            fail("Interface method arg count mismatch");
+
+          emit(OP_CALL_DYN_BOT);
+          emit(args);
+
+          *struct_id = structs[parent_sid].fields[field_idx].ret_sids[0];
+          *array_depth = structs[parent_sid].fields[field_idx].ret_ads[0];
+          free(name);
+          return structs[parent_sid].fields[field_idx].ret_types[0];
+        }
+        // -----------------------------
+
         if (cur.kind == TK_ASSIGN) {
           next();
           int d1, d2;
           expression(&d1, &d2);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         } else if (cur.kind == TK_PLUS_ASSIGN) {
@@ -323,7 +418,7 @@ DataType factor(int *struct_id, int *array_depth) {
             emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         } else if (cur.kind == TK_MINUS_ASSIGN) {
@@ -339,7 +434,7 @@ DataType factor(int *struct_id, int *array_depth) {
             emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         } else if (cur.kind == TK_INC) {
@@ -352,7 +447,7 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         } else if (cur.kind == TK_DEC) {
@@ -365,7 +460,7 @@ DataType factor(int *struct_id, int *array_depth) {
           emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         }
@@ -380,19 +475,19 @@ DataType factor(int *struct_id, int *array_depth) {
           int d1, d2;
           expression(&d1, &d2);
           emit(OP_SET_INDEX);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         } else if (cur.kind == TK_INC) {
           next();
           emit(OP_INC_INDEX);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         } else if (cur.kind == TK_DEC) {
           next();
           emit(OP_DEC_INDEX);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return t;
         }
@@ -854,8 +949,20 @@ void statement() {
     int ad = 0;
     DataType type = TYPE_VOID;
     int is_decl = 0;
-    if (cur.kind != TK_ID || find_struct(cur.text) != -1)
+
+    if (cur.kind != TK_ID) {
       is_decl = 1;
+    } else {
+      if (find_struct(cur.text) != -1) {
+        is_decl = 1;
+      } else if (find_enum(cur.text) != -1) {
+        TkKind pk = peek_kind();
+        if (pk == TK_ID || pk == TK_LBRACKET) {
+          is_decl = 1;
+        }
+      }
+    }
+
     if (is_decl) {
       parse_type(&type, &sid, &ad);
       if (cur.kind == TK_ID) {
@@ -864,6 +971,9 @@ void statement() {
         if (accept(TK_ASSIGN)) {
           int rhs_sid, rhs_ad;
           expression(&rhs_sid, &rhs_ad);
+          // --- NEW: TAG THE ALLOCATION ---
+          emit(OP_TAG_ALLOC);
+          emit32(add_str(name));
         } else {
           emit(OP_CONST_INT);
           emit32(0);
@@ -1142,13 +1252,49 @@ void statement() {
         if (field_idx == -1)
           fail("Unknown field '%s'", cur.text);
         next();
+
+        // --- INTERFACE METHOD CALL ---
+        if (structs[parent_sid].is_interface && cur.kind == TK_LPAREN) {
+          accept(TK_LPAREN);
+          emit(OP_GET_FIELD);
+          emit(structs[parent_sid].fields[field_idx].offset);
+
+          int args = 0;
+          if (cur.kind != TK_RPAREN) {
+            do {
+              int d1, d2;
+              expression(&d1, &d2);
+              args++;
+            } while (accept(TK_COMMA));
+          }
+          expect(TK_RPAREN);
+          expect(TK_SEMI);
+
+          if (args != structs[parent_sid].fields[field_idx].arg_count)
+            fail("Interface method arg count mismatch");
+
+          emit(OP_CALL_DYN_BOT);
+          emit(args);
+
+          for (int i = 0; i < structs[parent_sid].fields[field_idx].ret_count;
+               i++)
+            emit(OP_POP);
+
+          free(name);
+          return;
+        }
+        // -----------------------------
+
         if (cur.kind == TK_ASSIGN) {
           next();
           int d1, d2;
           expression(&d1, &d2);
+          // --- NEW: TAG THE ALLOCATION ---
+          emit(OP_TAG_ALLOC);
+          emit32(add_str(name));
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_PLUS_ASSIGN) {
@@ -1164,7 +1310,7 @@ void statement() {
             emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_MINUS_ASSIGN) {
@@ -1180,7 +1326,7 @@ void statement() {
             emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_INC) {
@@ -1193,7 +1339,7 @@ void statement() {
           emit(OP_ADD);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_DEC) {
@@ -1206,7 +1352,7 @@ void statement() {
           emit(OP_SUB);
           emit(OP_SET_FIELD);
           emit(structs[parent_sid].fields[field_idx].offset);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         }
@@ -1220,20 +1366,23 @@ void statement() {
           next();
           int d1, d2;
           expression(&d1, &d2);
+          // --- NEW: TAG THE ALLOCATION ---
+          emit(OP_TAG_ALLOC);
+          emit32(add_str(name));
           emit(OP_SET_INDEX);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_INC) {
           next();
           emit(OP_INC_INDEX);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         } else if (cur.kind == TK_DEC) {
           next();
           emit(OP_DEC_INDEX);
-          expect(TK_SEMI); // <--- ADDED
+          expect(TK_SEMI);
           free(name);
           return;
         }
@@ -1247,6 +1396,9 @@ void statement() {
       emit(OP_POP);
       int d1, d2;
       expression(&d1, &d2);
+      // --- NEW: TAG THE ALLOCATION ---
+      emit(OP_TAG_ALLOC);
+      emit32(add_str(name));
       expect(TK_SEMI);
       if (lid != -1) {
         emit(OP_SET_LOCAL);
@@ -1294,6 +1446,117 @@ void parse_struct() {
     offset++;
     next();
     expect(TK_SEMI);
+  }
+  structs[sid].field_count = offset;
+  structs[sid].size = offset;
+  expect(TK_RBRACE);
+}
+
+void parse_enum() {
+  expect(TK_ENUM);
+  if (cur.kind != TK_ID)
+    fail("Expected enum name");
+  int eid = add_enum(strdup(cur.text));
+  next();
+  expect(TK_LBRACE);
+  int current_val = 0;
+  while (cur.kind != TK_RBRACE) {
+    if (cur.kind != TK_ID)
+      fail("Expected enum value name");
+    char *vname = strdup(cur.text);
+    next();
+    if (accept(TK_ASSIGN)) {
+      int sign = 1;
+      if (accept(TK_MINUS))
+        sign = -1;
+      if (cur.kind != TK_NUM_INT)
+        fail("Expected integer for enum value");
+      current_val = cur.ival * sign;
+      next();
+    }
+    add_enum_value(eid, vname, current_val++);
+    if (accept(TK_COMMA)) {
+      // continue
+    } else {
+      break;
+    }
+  }
+  expect(TK_RBRACE);
+}
+
+void parse_interface() {
+  expect(TK_INTERFACE);
+  if (cur.kind != TK_ID)
+    fail("Expected interface name");
+  int sid = add_struct(strdup(cur.text));
+  structs[sid].is_interface = 1;
+  next();
+  expect(TK_LBRACE);
+  int offset = 0;
+  while (cur.kind != TK_RBRACE) {
+    expect(TK_FUNCTION);
+    if (cur.kind != TK_ID)
+      fail("Expected method name");
+    structs[sid].fields[offset].name = strdup(cur.text);
+    structs[sid].fields[offset].type = TYPE_INT;
+    structs[sid].fields[offset].struct_id = -1;
+    structs[sid].fields[offset].array_depth = 0;
+    structs[sid].fields[offset].offset = offset;
+    next();
+
+    expect(TK_LPAREN);
+    int arg_count = 0;
+    if (cur.kind != TK_RPAREN) {
+      do {
+        DataType at;
+        int asid;
+        int aad;
+        parse_type(&at, &asid, &aad);
+        if (cur.kind != TK_ID)
+          fail("Expected arg name");
+        next();
+        arg_count++;
+      } while (accept(TK_COMMA));
+    }
+    expect(TK_RPAREN);
+
+    int ret_count = 0;
+    DataType ret_types[8];
+    int ret_sids[8];
+    int ret_ads[8];
+
+    if (accept(TK_COLON)) {
+      if (accept(TK_LPAREN)) {
+        do {
+          parse_type(&ret_types[ret_count], &ret_sids[ret_count],
+                     &ret_ads[ret_count]);
+          ret_count++;
+          if (cur.kind == TK_ID)
+            next();
+        } while (accept(TK_COMMA));
+        expect(TK_RPAREN);
+      } else {
+        parse_type(&ret_types[ret_count], &ret_sids[ret_count],
+                   &ret_ads[ret_count]);
+        ret_count++;
+      }
+    } else {
+      ret_types[0] = TYPE_VOID;
+      ret_sids[0] = -1;
+      ret_ads[0] = 0;
+      ret_count = 1;
+    }
+    expect(TK_SEMI);
+
+    structs[sid].fields[offset].arg_count = arg_count;
+    structs[sid].fields[offset].ret_count = ret_count;
+    for (int i = 0; i < ret_count; i++) {
+      structs[sid].fields[offset].ret_types[i] = ret_types[i];
+      structs[sid].fields[offset].ret_sids[i] = ret_sids[i];
+      structs[sid].fields[offset].ret_ads[i] = ret_ads[i];
+    }
+
+    offset++;
   }
   structs[sid].field_count = offset;
   structs[sid].size = offset;
@@ -1454,6 +1717,10 @@ void parse_program() {
       expect(TK_SEMI);
       lexer_include(path);
       continue;
+    } else if (cur.kind == TK_ENUM) {
+      parse_enum();
+    } else if (cur.kind == TK_INTERFACE) {
+      parse_interface();
     } else if (cur.kind == TK_STRUCT) {
       parse_struct();
     } else if (cur.kind == TK_FUNCTION) {
@@ -1487,6 +1754,9 @@ void parse_program() {
           next();
           int d1, d2;
           expression(&d1, &d2);
+          // --- NEW: TAG THE ALLOCATION ---
+          emit(OP_TAG_ALLOC);
+          emit32(add_str(name));
           emit(OP_SET_GLOBAL);
           emit(gid);
         }

@@ -22,6 +22,10 @@
 #define C_BOLD "\033[1m"
 #define C_RED "\033[31m"
 #define C_GRAY "\033[90m"
+#define C_CYAN "\033[36m"
+#define C_GREEN "\033[32m"
+#define C_YELLOW "\033[33m"
+#define C_MAGENTA "\033[35m"
 
 // --- MEMORY TRACKING ---
 typedef struct AllocInfo {
@@ -29,7 +33,12 @@ typedef struct AllocInfo {
   uint32_t struct_id;
   uint32_t size;
   size_t alloc_fp;
+  size_t alloc_ip;
+  size_t free_ip; // NEW: Tracks where it was freed
+  char *tag;
+  char *comment;
   int is_stack;
+  int is_freed; // NEW: Tracks if it's active or historical
   struct AllocInfo *next;
 } AllocInfo;
 
@@ -78,14 +87,20 @@ static inline __attribute__((always_inline)) int64_t pop() {
 }
 
 // --- MEMORY MANAGEMENT ---
-void track_alloc(void *ptr, uint32_t sid, uint32_t size, int is_stack) {
+void track_alloc(void *ptr, uint32_t sid, uint32_t size, int is_stack,
+                 char *comment) {
 #ifdef ENABLE_ABYSS_EYE
   AllocInfo *node = malloc(sizeof(AllocInfo));
   node->ptr = ptr;
   node->struct_id = sid;
   node->size = size;
   node->alloc_fp = fp;
+  node->alloc_ip = ip;
+  node->free_ip = 0;
+  node->tag = NULL;
+  node->comment = comment;
   node->is_stack = is_stack;
+  node->is_freed = 0;
   node->next = alloc_head;
   alloc_head = node;
 #else
@@ -93,20 +108,20 @@ void track_alloc(void *ptr, uint32_t sid, uint32_t size, int is_stack) {
   (void)sid;
   (void)size;
   (void)is_stack;
+  (void)comment;
 #endif
 }
 
 void untrack_alloc(void *ptr) {
 #ifdef ENABLE_ABYSS_EYE
-  AllocInfo **curr = &alloc_head;
-  while (*curr) {
-    if ((*curr)->ptr == ptr) {
-      AllocInfo *temp = *curr;
-      *curr = (*curr)->next;
-      free(temp);
+  AllocInfo *curr = alloc_head;
+  while (curr) {
+    if (curr->ptr == ptr && !curr->is_freed) {
+      curr->is_freed = 1;
+      curr->free_ip = ip; // Record exactly where it was freed!
       return;
     }
-    curr = &(*curr)->next;
+    curr = curr->next;
   }
 #else
   (void)ptr;
@@ -115,36 +130,254 @@ void untrack_alloc(void *ptr) {
 
 void free_stack_allocs(size_t current_fp) {
 #ifdef ENABLE_ABYSS_EYE
-  AllocInfo **curr = &alloc_head;
-  while (*curr) {
-    if ((*curr)->is_stack && (*curr)->alloc_fp >= current_fp) {
-      AllocInfo *temp = *curr;
-      *curr = (*curr)->next;
-      free(temp->ptr);
-      free(temp);
-    } else {
-      curr = &(*curr)->next;
+  AllocInfo *curr = alloc_head;
+  while (curr) {
+    if (curr->is_stack && !curr->is_freed && curr->alloc_fp >= current_fp) {
+      curr->is_freed = 1;
+      curr->free_ip = ip;
+      free(curr->ptr); // Actually free the memory
     }
+    curr = curr->next;
   }
 #else
   (void)current_fp;
 #endif
 }
 
+// --- REVOLUTIONARY ABYSS EYE HUD ---
 void abyss_eye() {
 #ifdef ENABLE_ABYSS_EYE
   AllocInfo *curr = alloc_head;
-  printf("\n" C_GRAY "  ╭" C_BOLD " 👁️  ABYSS EYE " C_RESET C_GRAY
-         "──────────────────────────────────────────╮" C_RESET "\n");
+
+  uint32_t active_stack = 0;
+  uint32_t active_heap = 0;
+  uint32_t total_freed = 0;
+  uint32_t total_allocs = 0;
+  int active_count = 0;
+
+  // Pass 1: Calculate Statistics
   while (curr) {
-    printf(C_GRAY "  │ " C_RESET "0x%-16lx" C_GRAY " │ " C_RESET
-                  "%-4u bytes" C_GRAY "     │" C_RESET "\n",
-           (uintptr_t)curr->ptr, curr->size);
+    total_allocs++;
+    if (curr->is_freed) {
+      total_freed += curr->size;
+    } else {
+      active_count++;
+      if (curr->is_stack)
+        active_stack += curr->size;
+      else
+        active_heap += curr->size;
+    }
     curr = curr->next;
   }
-  printf(C_GRAY
-         "  ╰──────────────────────────────────────────────────────╯" C_RESET
-         "\n\n");
+
+  printf("\n");
+
+  // ==========================================
+  // SECTION 1: OVERALL RESOURCES
+  // ==========================================
+  printf(C_BOLD C_CYAN
+         "  "
+         "╭────────────────────────────────────────────────────────────────────"
+         "──────────────────────────────────────────╮\n" C_RESET);
+  printf(C_BOLD C_CYAN
+         "  │" C_RESET C_BOLD
+         "  📊   S Y S T E M   R E S O U R C E S                               "
+         "                                        " C_BOLD C_CYAN
+         "│\n" C_RESET);
+  printf(C_BOLD C_CYAN
+         "  "
+         "├────────────────────────────────────────────────────────────────────"
+         "──────────────────────────────────────────┤\n" C_RESET);
+  printf(C_BOLD C_CYAN "  │" C_RESET "  Active Stack Memory : " C_BOLD C_GREEN
+                       "%-8u bytes" C_RESET
+                       "                                                       "
+                       "                " C_BOLD C_CYAN "│\n" C_RESET,
+         active_stack);
+  printf(C_BOLD C_CYAN "  │" C_RESET "  Active Heap Memory  : " C_BOLD C_YELLOW
+                       "%-8u bytes" C_RESET
+                       "                                                       "
+                       "                " C_BOLD C_CYAN "│\n" C_RESET,
+         active_heap);
+  printf(C_BOLD C_CYAN "  │" C_RESET "  Total Memory Freed  : " C_BOLD C_GRAY
+                       "%-8u bytes" C_RESET
+                       "                                                       "
+                       "                " C_BOLD C_CYAN "│\n" C_RESET,
+         total_freed);
+  printf(C_BOLD C_CYAN "  │" C_RESET "  Total Allocations   : " C_BOLD
+                       "%-8u" C_RESET
+                       "                                                       "
+                       "                      " C_BOLD C_CYAN "│\n" C_RESET,
+         total_allocs);
+  printf(C_BOLD C_CYAN
+         "  "
+         "╰────────────────────────────────────────────────────────────────────"
+         "──────────────────────────────────────────╯\n\n" C_RESET);
+
+  // ==========================================
+  // SECTION 2: ACTIVE MEMORY (HEXDUMP)
+  // ==========================================
+  printf(C_BOLD C_RED
+         "  "
+         "╭────────────────────────────────────────────────────────────────────"
+         "──────────────────────────────────────────╮\n" C_RESET);
+  printf(C_BOLD C_RED
+         "  │" C_RESET C_BOLD
+         "  👁️   A B Y S S   E Y E   —   A C T I V E   M E M O R Y             "
+         "                                      " C_BOLD C_RED "│\n" C_RESET);
+  printf(C_BOLD C_RED
+         "  "
+         "├───────────────────┬───────┬──────────────┬────────────┬───────┬────"
+         "─────┬──────────────────────────────────┤\n" C_RESET);
+  printf(C_BOLD C_RED
+         "  │" C_RESET " ADDRESS           " C_BOLD C_RED "│" C_RESET
+         " BYTES " C_BOLD C_RED "│" C_RESET " TYPE         " C_BOLD C_RED
+         "│" C_RESET " VARIABLE   " C_BOLD C_RED "│" C_RESET
+         " SCOPE " C_BOLD C_RED "│" C_RESET " ORIGIN  " C_BOLD C_RED "│" C_RESET
+         " COMMENT / HEXDUMP                " C_BOLD C_RED "│\n" C_RESET);
+  printf(C_BOLD C_RED
+         "  "
+         "├───────────────────┼───────┼──────────────┼────────────┼───────┼────"
+         "─────┼──────────────────────────────────┤\n" C_RESET);
+
+  if (active_count == 0) {
+    printf(C_BOLD C_RED
+           "  │" C_RESET C_GRAY
+           "  (The Abyss is empty. No active allocations.)                     "
+           "                                           " C_BOLD C_RED
+           "│\n" C_RESET);
+  }
+
+  curr = alloc_head;
+  while (curr) {
+    if (!curr->is_freed) {
+      const char *icon = curr->is_stack ? "⚡" : "💎";
+      const char *type_name = (curr->struct_id == 0xFFFFFFFF)
+                                  ? "Array"
+                                  : structs[curr->struct_id].name;
+      const char *tag_name = curr->tag ? curr->tag : "-";
+      const char *lifetime = curr->is_stack ? "Stack" : "Heap";
+      const char *comment_str = curr->comment ? curr->comment : "-";
+
+      char hex_buf[33];
+      memset(hex_buf, ' ', 32);
+      hex_buf[32] = '\0';
+      uint8_t *bytes = (uint8_t *)curr->ptr;
+      int offset = 0;
+      for (uint32_t i = 0; i < 8 && i < curr->size; i++) {
+        offset += sprintf(hex_buf + offset, "%02X ", bytes[i]);
+      }
+      if (curr->size > 8) {
+        sprintf(hex_buf + offset, "...");
+      } else if (offset < 32) {
+        hex_buf[offset] = ' ';
+      }
+
+      printf(C_BOLD C_RED
+             "  │ " C_RESET "%s " C_BOLD C_CYAN "0x%012lx" C_RESET C_BOLD C_RED
+             " │ " C_RESET "%-5u" C_BOLD C_RED " │ " C_RESET
+             "%-12.12s" C_BOLD C_RED " │ " C_RESET "%-10.10s" C_BOLD C_RED
+             " │ " C_RESET "%-5s" C_BOLD C_RED " │ " C_RESET
+             "IP:%-4lX" C_BOLD C_RED " │ " C_YELLOW "\"%-30.30s\"" C_BOLD C_RED
+             " │\n" C_RESET,
+             icon, (uintptr_t)curr->ptr, curr->size, type_name, tag_name,
+             lifetime, curr->alloc_ip, comment_str);
+      printf(C_BOLD C_RED "  │                   │       │              │      "
+                          "      │       │         │ " C_GREEN
+                          "%-32.32s" C_BOLD C_RED " │\n" C_RESET,
+             hex_buf);
+
+      // Print separator if not the last active item
+      AllocInfo *next_active = curr->next;
+      while (next_active && next_active->is_freed)
+        next_active = next_active->next;
+      if (next_active) {
+        printf(C_BOLD C_RED
+               "  "
+               "├───────────────────┼───────┼──────────────┼────────────┼──────"
+               "─┼─────────┼──────────────────────────────────┤\n" C_RESET);
+      }
+    }
+    curr = curr->next;
+  }
+  printf(C_BOLD C_RED
+         "  "
+         "╰───────────────────┴───────┴──────────────┴────────────┴───────┴────"
+         "─────┴──────────────────────────────────╯\n\n" C_RESET);
+
+  // ==========================================
+  // SECTION 3: LIFECYCLE & LEAK ANALYSIS
+  // ==========================================
+  printf(C_BOLD C_MAGENTA
+         "  "
+         "╭────────────────────────────────────────────────────────────────────"
+         "──────────────────────────────────────────╮\n" C_RESET);
+  printf(C_BOLD C_MAGENTA
+         "  │" C_RESET C_BOLD
+         "  🧬   L I F E C Y C L E   &   L E A K   A N A L Y S I S             "
+         "                                      " C_BOLD C_MAGENTA
+         "│\n" C_RESET);
+  printf(C_BOLD C_MAGENTA
+         "  "
+         "├───────────────────┬───────┬──────────────┬────────────┬───────┬────"
+         "───────────┬────────────────────────────┤\n" C_RESET);
+  printf(C_BOLD C_MAGENTA
+         "  │" C_RESET " ADDRESS           " C_BOLD C_MAGENTA "│" C_RESET
+         " BYTES " C_BOLD C_MAGENTA "│" C_RESET
+         " TYPE         " C_BOLD C_MAGENTA "│" C_RESET
+         " VARIABLE   " C_BOLD C_MAGENTA "│" C_RESET " SCOPE " C_BOLD C_MAGENTA
+         "│" C_RESET " STATUS        " C_BOLD C_MAGENTA "│" C_RESET
+         " LIFESPAN                   " C_BOLD C_MAGENTA "│\n" C_RESET);
+  printf(C_BOLD C_MAGENTA
+         "  "
+         "├───────────────────┼───────┼──────────────┼────────────┼───────┼────"
+         "───────────┼────────────────────────────┤\n" C_RESET);
+
+  curr = alloc_head;
+  if (!curr) {
+    printf(C_BOLD C_MAGENTA
+           "  │" C_RESET C_GRAY
+           "  (No allocations tracked.)                                        "
+           "                                           " C_BOLD C_MAGENTA
+           "│\n" C_RESET);
+  }
+
+  while (curr) {
+    const char *type_name = (curr->struct_id == 0xFFFFFFFF)
+                                ? "Array"
+                                : structs[curr->struct_id].name;
+    const char *tag_name = curr->tag ? curr->tag : "-";
+    const char *lifetime = curr->is_stack ? "Stack" : "Heap";
+
+    if (curr->is_freed) {
+      printf(C_BOLD C_MAGENTA
+             "  │ " C_RESET C_CYAN "0x%012lx" C_RESET C_BOLD C_MAGENTA
+             " │ " C_RESET "%-5u" C_BOLD C_MAGENTA " │ " C_RESET
+             "%-12.12s" C_BOLD C_MAGENTA " │ " C_RESET
+             "%-10.10s" C_BOLD C_MAGENTA " │ " C_RESET "%-5s" C_BOLD C_MAGENTA
+             " │ " C_BOLD C_GREEN "[OK] FREED   " C_RESET C_BOLD C_MAGENTA
+             " │ " C_RESET "IP:%04lX -> IP:%04lX      " C_BOLD C_MAGENTA
+             " │\n" C_RESET,
+             (uintptr_t)curr->ptr, curr->size, type_name, tag_name, lifetime,
+             curr->alloc_ip, curr->free_ip);
+    } else {
+      printf(C_BOLD C_MAGENTA
+             "  │ " C_RESET C_CYAN "0x%012lx" C_RESET C_BOLD C_MAGENTA
+             " │ " C_RESET "%-5u" C_BOLD C_MAGENTA " │ " C_RESET
+             "%-12.12s" C_BOLD C_MAGENTA " │ " C_RESET
+             "%-10.10s" C_BOLD C_MAGENTA " │ " C_RESET "%-5s" C_BOLD C_MAGENTA
+             " │ " C_BOLD C_RED "[!!] ACTIVE  " C_RESET C_BOLD C_MAGENTA
+             " │ " C_RESET "IP:%04lX -> " C_YELLOW
+             "???             " C_RESET C_BOLD C_MAGENTA " │\n" C_RESET,
+             (uintptr_t)curr->ptr, curr->size, type_name, tag_name, lifetime,
+             curr->alloc_ip);
+    }
+
+    curr = curr->next;
+  }
+  printf(C_BOLD C_MAGENTA
+         "  "
+         "╰───────────────────┴───────┴──────────────┴────────────┴───────┴────"
+         "───────────┴────────────────────────────╯\n\n" C_RESET);
 #endif
 }
 
@@ -245,7 +478,9 @@ int main(int argc, char **argv) {
                                    [OP_DUP] = &&L_OP_DUP,
                                    [OP_ALLOC_STACK] = &&L_OP_ALLOC_STACK,
                                    [OP_INC_INDEX] = &&L_OP_INC_INDEX,
-                                   [OP_DEC_INDEX] = &&L_OP_DEC_INDEX};
+                                   [OP_DEC_INDEX] = &&L_OP_DEC_INDEX,
+                                   [OP_CALL_DYN_BOT] = &&L_OP_CALL_DYN_BOT,
+                                   [OP_TAG_ALLOC] = &&L_OP_TAG_ALLOC};
 
 #define DISPATCH() goto *dispatch_table[code[ip++]]
 
@@ -546,25 +781,33 @@ L_OP_POP: {
 }
 
 L_OP_ALLOC_STRUCT: {
-  uint32_t sid;
+  uint32_t sid, cidx;
   memcpy(&sid, code + ip, 4);
   ip += 4;
+  memcpy(&cidx, code + ip, 4);
+  ip += 4;
+  char *comment = (cidx == 0xFFFFFFFF) ? NULL : strs[cidx];
+
   uint32_t size = structs[sid].size * 8;
   int64_t *ptr = malloc(size);
   memset(ptr, 0, size);
-  track_alloc(ptr, sid, size, 0);
+  track_alloc(ptr, sid, size, 0, comment);
   push((int64_t)ptr);
   DISPATCH();
 }
 L_OP_ALLOC_ARRAY: {
-  uint32_t elem_size;
+  uint32_t elem_size, cidx;
   memcpy(&elem_size, code + ip, 4);
   ip += 4;
+  memcpy(&cidx, code + ip, 4);
+  ip += 4;
+  char *comment = (cidx == 0xFFFFFFFF) ? NULL : strs[cidx];
+
   int64_t count = pop();
   uint32_t total_size = count * 8;
   int64_t *ptr = malloc(total_size);
   memset(ptr, 0, total_size);
-  track_alloc(ptr, 0xFFFFFFFF, total_size, 0);
+  track_alloc(ptr, 0xFFFFFFFF, total_size, 0, comment);
   push((int64_t)ptr);
   DISPATCH();
 }
@@ -659,7 +902,7 @@ L_OP_NATIVE: {
     int64_t iv = pop();
     double v;
     memcpy(&v, &iv, 8);
-    abyss_io_print_float(v); // <--- FIXED NAME
+    abyss_io_print_float(v);
   } else if (nid == 20) {
     int64_t exp = pop();
     int64_t base = pop();
@@ -675,13 +918,17 @@ L_OP_DUP: {
   DISPATCH();
 }
 L_OP_ALLOC_STACK: {
-  uint32_t sid;
+  uint32_t sid, cidx;
   memcpy(&sid, code + ip, 4);
   ip += 4;
+  memcpy(&cidx, code + ip, 4);
+  ip += 4;
+  char *comment = (cidx == 0xFFFFFFFF) ? NULL : strs[cidx];
+
   uint32_t size = structs[sid].size * 8;
   int64_t *ptr = malloc(size);
   memset(ptr, 0, size);
-  track_alloc(ptr, sid, size, 1);
+  track_alloc(ptr, sid, size, 1, comment);
   push((int64_t)ptr);
   DISPATCH();
 }
@@ -695,6 +942,39 @@ L_OP_DEC_INDEX: {
   int64_t idx = pop();
   int64_t *ptr = (int64_t *)pop();
   ptr[idx]--;
+  DISPATCH();
+}
+L_OP_CALL_DYN_BOT: {
+  uint8_t argc = code[ip++];
+  uint32_t addr = (uint32_t)stack[sp - argc - 1];
+
+  for (int i = 0; i < argc; i++) {
+    stack[sp - argc - 1 + i] = stack[sp - argc + i];
+  }
+  sp--;
+
+  call_stack[csp].ret_addr = ip;
+  call_stack[csp].old_fp = fp;
+  csp++;
+  fp = sp - argc;
+  ip = addr;
+  DISPATCH();
+}
+L_OP_TAG_ALLOC: {
+  uint32_t str_idx;
+  memcpy(&str_idx, code + ip, 4);
+  ip += 4;
+
+  int64_t ptr_val = stack[sp - 1];
+
+  AllocInfo *curr = alloc_head;
+  while (curr) {
+    if ((int64_t)curr->ptr == ptr_val && !curr->is_freed) {
+      curr->tag = strs[str_idx];
+      break;
+    }
+    curr = curr->next;
+  }
   DISPATCH();
 }
 

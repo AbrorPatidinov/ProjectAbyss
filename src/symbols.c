@@ -19,6 +19,10 @@ StructInfo *structs = NULL;
 int struct_count = 0;
 static int struct_cap = 0;
 
+EnumInfo *enums = NULL;
+int enum_count = 0;
+static int enum_cap = 0;
+
 void symbols_init() {
   global_cap = INIT_CAP;
   global_count = 0;
@@ -35,6 +39,10 @@ void symbols_init() {
   struct_cap = INIT_CAP;
   struct_count = 0;
   structs = malloc(struct_cap * sizeof(StructInfo));
+
+  enum_cap = INIT_CAP;
+  enum_count = 0;
+  enums = malloc(enum_cap * sizeof(EnumInfo));
 }
 
 int find_local(const char *name) {
@@ -94,6 +102,8 @@ int add_struct(char *name) {
   }
   int sid = struct_count;
   structs[sid].name = name;
+  structs[sid].is_interface = 0;
+  memset(structs[sid].fields, 0, sizeof(structs[sid].fields));
   struct_count++;
   return sid;
 }
@@ -106,4 +116,37 @@ int add_func(char *name, uint32_t addr) {
   funcs[func_count].name = name;
   funcs[func_count].addr = addr;
   return func_count++;
+}
+
+int add_enum(char *name) {
+  if (enum_count >= enum_cap) {
+    enum_cap = enum_cap ? enum_cap * 2 : INIT_CAP;
+    enums = realloc(enums, enum_cap * sizeof(EnumInfo));
+  }
+  int eid = enum_count;
+  enums[eid].name = name;
+  enums[eid].value_count = 0;
+  enum_count++;
+  return eid;
+}
+
+void add_enum_value(int eid, char *name, int value) {
+  int vc = enums[eid].value_count;
+  enums[eid].values[vc].name = name;
+  enums[eid].values[vc].value = value;
+  enums[eid].value_count++;
+}
+
+int find_enum(const char *name) {
+  for (int i = 0; i < enum_count; i++)
+    if (!strcmp(enums[i].name, name))
+      return i;
+  return -1;
+}
+
+int get_enum_value(int eid, const char *name) {
+  for (int i = 0; i < enums[eid].value_count; i++)
+    if (!strcmp(enums[eid].values[i].name, name))
+      return enums[eid].values[i].value;
+  return -1;
 }

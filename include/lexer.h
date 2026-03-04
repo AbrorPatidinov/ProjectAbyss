@@ -17,7 +17,8 @@ typedef enum {
     TK_INC, TK_DEC, TK_PLUS_ASSIGN, TK_MINUS_ASSIGN,
     TK_QUESTION, TK_STACK,
     TK_BREAK, TK_CONTINUE,
-    TK_IMPORT
+    TK_IMPORT,
+    TK_ENUM, TK_INTERFACE
 } TkKind;
 
 typedef struct {
@@ -38,5 +39,6 @@ int accept(TkKind k);
 void expect(TkKind k);
 const char* tk_str(TkKind k);
 void print_error_context();
+TkKind peek_kind();
 
 #endif

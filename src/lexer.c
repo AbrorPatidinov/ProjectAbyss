@@ -23,13 +23,20 @@ static int line = 1;
 static int col = 1;
 Token cur;
 
-static const char *tk_names[] = {
-    [TK_EOF] = "EOF",     [TK_ID] = "Identifier", [TK_IMPORT] = "import",
-    [TK_NUM_INT] = "Int", [TK_STR] = "String",    [TK_SEMI] = ";",
-    [TK_DOT] = ".",       [TK_LPAREN] = "(",      [TK_RPAREN] = ")"};
+static const char *tk_names[] = {[TK_EOF] = "EOF",
+                                 [TK_ID] = "Identifier",
+                                 [TK_IMPORT] = "import",
+                                 [TK_ENUM] = "enum",
+                                 [TK_INTERFACE] = "interface",
+                                 [TK_NUM_INT] = "Int",
+                                 [TK_STR] = "String",
+                                 [TK_SEMI] = ";",
+                                 [TK_DOT] = ".",
+                                 [TK_LPAREN] = "(",
+                                 [TK_RPAREN] = ")"};
 
 const char *tk_str(TkKind k) {
-  if (k >= 0 && k <= TK_IMPORT)
+  if (k >= 0 && k <= TK_INTERFACE)
     return tk_names[k] ? tk_names[k] : "Token";
   return "Token";
 }
@@ -105,6 +112,27 @@ void lexer_include(char *filename) {
 
   // Prime the first token of the new file
   next();
+}
+
+TkKind peek_kind() {
+  size_t saved_pos = pos;
+  int saved_line = line;
+  int saved_col = col;
+  Token saved_cur = cur;
+  if (saved_cur.text)
+    saved_cur.text = strdup(saved_cur.text);
+
+  next();
+  TkKind k = cur.kind;
+
+  if (cur.text)
+    free(cur.text);
+  cur = saved_cur;
+  pos = saved_pos;
+  line = saved_line;
+  col = saved_col;
+
+  return k;
 }
 
 void next() {
@@ -198,6 +226,10 @@ void next() {
       cur.kind = TK_PRINT;
     else if (!strcmp(cur.text, "import"))
       cur.kind = TK_IMPORT;
+    else if (!strcmp(cur.text, "enum"))
+      cur.kind = TK_ENUM;
+    else if (!strcmp(cur.text, "interface"))
+      cur.kind = TK_INTERFACE;
     else if (!strcmp(cur.text, "try"))
       cur.kind = TK_TRY;
     else if (!strcmp(cur.text, "catch"))

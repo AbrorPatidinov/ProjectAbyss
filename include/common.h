@@ -36,9 +36,11 @@ enum {
     OP_NATIVE,
     OP_DUP,
     OP_ALLOC_STACK,
-    // --- NEW OPCODES ---
-    OP_INC_INDEX, // arr[i]++
-    OP_DEC_INDEX  // arr[i]--
+    OP_INC_INDEX,
+    OP_DEC_INDEX,
+    OP_CALL_DYN_BOT,
+    // --- NEW OPCODE ---
+    OP_TAG_ALLOC // Tags the allocation on top of the stack with a variable name
 };
 
 #endif
