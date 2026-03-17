@@ -520,6 +520,15 @@ DataType factor(int *struct_id, int *array_depth) {
       free(name);
       return t;
     } else if (accept(TK_INC)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       emit(OP_CONST_INT);
       emit32(1);
       emit(OP_ADD);
@@ -534,6 +543,15 @@ DataType factor(int *struct_id, int *array_depth) {
       free(name);
       return t;
     } else if (accept(TK_DEC)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       emit(OP_CONST_INT);
       emit32(1);
       emit(OP_SUB);
@@ -548,6 +566,15 @@ DataType factor(int *struct_id, int *array_depth) {
       free(name);
       return t;
     } else if (accept(TK_PLUS_ASSIGN)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       int d1, d2;
       expression(&d1, &d2);
       emit(OP_ADD);
@@ -562,6 +589,15 @@ DataType factor(int *struct_id, int *array_depth) {
       free(name);
       return t;
     } else if (accept(TK_MINUS_ASSIGN)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       int d1, d2;
       expression(&d1, &d2);
       emit(OP_SUB);
@@ -1267,6 +1303,15 @@ void statement() {
     // -------------------------------------------
 
     if (accept(TK_INC)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       emit(OP_CONST_INT);
       emit32(1);
       emit(OP_ADD);
@@ -1282,6 +1327,15 @@ void statement() {
       return;
     }
     if (accept(TK_DEC)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       emit(OP_CONST_INT);
       emit32(1);
       emit(OP_SUB);
@@ -1297,6 +1351,15 @@ void statement() {
       return;
     }
     if (accept(TK_PLUS_ASSIGN)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       int d1, d2;
       expression(&d1, &d2);
       emit(OP_ADD);
@@ -1312,6 +1375,15 @@ void statement() {
       return;
     }
     if (accept(TK_MINUS_ASSIGN)) {
+      // --- FIX: Push the variable to the stack first ---
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      // -------------------------------------------------
       int d1, d2;
       expression(&d1, &d2);
       emit(OP_SUB);

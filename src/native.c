@@ -368,7 +368,9 @@ void generate_native_code(const char *out_filename) {
           f,
           "  { Value rets[8]; for(int i=0; i<%u; i++) rets[i] = stack[--sp]; "
           "free_stack_allocs(fp, %zu); if(csp==0) goto cleanup; csp--; size_t "
-          "r = call_stack[csp].ret_addr; fp = call_stack[csp].old_fp; for(int "
+          "r = call_stack[csp].ret_addr; "
+          "sp = fp; " // <--- THE FIX: Reclaim the stack frame!
+          "fp = call_stack[csp].old_fp; for(int "
           "i=%u-1; i>=0; i--) stack[sp++] = rets[i]; goto *jump_table[r]; }\n",
           count, ip, count);
       break;

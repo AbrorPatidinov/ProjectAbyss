@@ -1,15 +1,28 @@
-void main() {
-    float start = clock();
-    int sum = 0;
+// benchmark.al
+function is_prime(int n) : (int res) {
+    if (n < 2) {
+        return 0;
+    }
+    for (int i = 2; i * i <= n; i++) {
+        if (n % i == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
-    for (int i = 0; i < 1000000; i++) {
-        sum += i;
+void main() {
+    print("--- AbyssLang CPU Benchmark ---");
+
+    int target = 100000;
+    int count = 0;
+
+    for (int i = 0; i <= target; i++) {
+        int check = is_prime(i);
+        if (check == 1) {
+            count++;
+        }
     }
 
-    float end = clock();
-    float elapsed = end - start;
-
-    print("Sum: %{int}", sum);
-    print("Elapsed: %{float} sec", elapsed);
-    print("Elapsed: %{float} ms", elapsed * 1000.0);
+    print("Total primes found up to %int: %int", target, count);
 }
