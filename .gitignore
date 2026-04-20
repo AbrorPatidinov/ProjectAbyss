@@ -12,6 +12,7 @@
 
 # Compiled language outputs
 *.aby
+demo
 
 # Binaries
 abyssc
@@ -25,3 +26,9 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 *.vsix
+
+# tests old and kits
+tests.old/
+tests/expected/
+toolkit_native
+abysslang-linux-x64.tar.gz

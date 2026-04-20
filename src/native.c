@@ -196,10 +196,13 @@ void generate_native_code(const char *out_filename, int enable_profiler)
         }
         case OP_CONST_FLOAT:
         {
-            int64_t v;
+            uint64_t v;
             memcpy(&v, code + ip, 8);
             ip += 8;
-            fprintf(f, "  stack[sp++].i = %ldLL;\n", v);
+            // Emit as hex literal cast from unsigned to signed. This is safe
+            // for every possible IEEE-754 bit pattern, including future NaN,
+            // Infinity, and hex-float literals that could set the high bit.
+            fprintf(f, "  stack[sp++].i = (int64_t)0x%016lxULL;\n", v);
             break;
         }
         case OP_CONST_STR:

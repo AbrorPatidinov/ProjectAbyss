@@ -19,4 +19,14 @@ int add_str(const char *s);
 size_t codegen_size(void);
 uint8_t *codegen_buffer(void);
 
+// --- Forward-reference patch table ---
+// Used by the two-pass compiler. When an OP_CALL is emitted, the target
+// function address may not be known yet (forward reference to a function
+// defined later in the file). Emit a placeholder address and record the
+// patch location; after the full parse, resolve_call_patches() walks the
+// list and writes the real address into every placeholder.
+void add_call_patch(size_t patch_addr, int fid);
+void resolve_call_patches(void);
+void emit_call_to(int fid, uint8_t argc);
+
 #endif

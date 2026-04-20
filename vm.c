@@ -85,6 +85,13 @@ static size_t esp = 0;
 
 static inline __attribute__((always_inline)) void push(int64_t v)
 {
+    if (__builtin_expect(sp >= STACK_SIZE, 0)) {
+        fprintf(stderr, "\033[1;31m[FATAL ERROR]\033[0m Stack overflow (limit %d slots).\n",
+                STACK_SIZE);
+        fprintf(stderr, "  This usually means deep recursion or an expression that keeps\n");
+        fprintf(stderr, "  pushing values without popping. Check loops and recursion depth.\n");
+        exit(1);
+    }
     stack[sp++] = v;
 }
 static inline __attribute__((always_inline)) int64_t pop()
@@ -402,10 +409,21 @@ int main(int argc, char **argv)
     char magic[8];
     fread(magic, 1, 7, f);
     magic[7] = 0;
-    if (strcmp(magic, MAGIC) != 0)
+    if (strcmp(magic, MAGIC) != 0) {
+        fprintf(stderr, "\033[1;31m[FATAL ERROR]\033[0m %s is not an AbyssLang bytecode file "
+                        "(bad magic).\n", argv[1]);
+        fclose(f);
         return 1;
+    }
     uint8_t ver;
     fread(&ver, 1, 1, f);
+    if (ver != VERSION) {
+        fprintf(stderr, "\033[1;31m[FATAL ERROR]\033[0m Bytecode version mismatch.\n");
+        fprintf(stderr, "  File %s was compiled with bytecode v%d.\n", argv[1], ver);
+        fprintf(stderr, "  This VM expects v%d. Recompile with the matching abyssc.\n", VERSION);
+        fclose(f);
+        return 1;
+    }
 
     fread(&str_count, 4, 1, f);
     strs = malloc(sizeof(char *) * str_count);
@@ -820,6 +838,12 @@ L_OP_CALL:
     memcpy(&addr, code + ip, 4);
     ip += 4;
     uint8_t argc = code[ip++];
+    if (__builtin_expect(csp >= CALL_STACK_SIZE, 0)) {
+        fprintf(stderr, "\033[1;31m[FATAL ERROR]\033[0m Call stack overflow (limit %d frames).\n",
+                CALL_STACK_SIZE);
+        fprintf(stderr, "  This usually means unbounded recursion. Check your base cases.\n");
+        exit(1);
+    }
     call_stack[csp].ret_addr = ip;
     call_stack[csp].old_fp = fp;
     csp++;

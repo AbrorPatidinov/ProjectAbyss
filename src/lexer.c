@@ -17,6 +17,21 @@ typedef struct FileContext {
 
 static FileContext *ctx_stack = NULL;
 
+// --- DOUBLE-IMPORT GUARD ---
+// Tracks which module paths have been included so the same module imported
+// from multiple places (e.g. std.math imported by std.io and by main) only
+// has its definitions emitted once into the bytecode.
+#define MAX_LOADED_FILES 128
+static char *loaded_files[MAX_LOADED_FILES];
+static int loaded_count = 0;
+
+static int is_loaded(const char *path) {
+  for (int i = 0; i < loaded_count; i++)
+    if (!strcmp(loaded_files[i], path))
+      return 1;
+  return 0;
+}
+
 static char *src;
 static size_t pos = 0;
 static int line = 1;
@@ -77,7 +92,40 @@ void lexer_init(char *source) {
   cur.text = NULL;
 }
 
+// Reset lexer to the start of the top-level source for a second pass.
+// Precondition: pass 1 ran cleanly to EOF, so all include contexts have
+// already been popped and src points at the original buffer.
+void lexer_reset_to_start(void) {
+  pos = 0;
+  line = 1;
+  col = 1;
+  if (cur.text) {
+    free(cur.text);
+    cur.text = NULL;
+  }
+  cur.kind = TK_EOF;
+}
+
+// Drop the set of already-imported modules so pass 2 re-processes each
+// import and emits bytecode for it. The single-pass dedupe is still the
+// right behavior within a single pass.
+void lexer_reset_imports(void) {
+  for (int i = 0; i < loaded_count; i++)
+    free(loaded_files[i]);
+  loaded_count = 0;
+}
+
 void lexer_include(char *filename) {
+  // Skip silently if this path has already been imported. Idempotent import
+  // is the expected behavior — the stdlib can be imported from multiple
+  // modules without emitting its definitions twice.
+  if (is_loaded(filename))
+    return;
+
+  if (loaded_count >= MAX_LOADED_FILES)
+    fail("Too many imports (limit %d)", MAX_LOADED_FILES);
+  loaded_files[loaded_count++] = strdup(filename);
+
   FILE *f = fopen(filename, "rb");
   if (!f)
     fail("Cannot open import file: %s", filename);

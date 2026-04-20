@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 #define MAGIC "ABYSSBC"
-#define VERSION 12
+#define VERSION 13
 #define INIT_CAP 128
 
 typedef enum {

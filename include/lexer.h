@@ -37,6 +37,8 @@ extern Token cur;
 
 void lexer_init(char *source);
 void lexer_include(char *filename);
+void lexer_reset_to_start(void);
+void lexer_reset_imports(void);
 void next();
 int accept(TkKind k);
 void expect(TkKind k);

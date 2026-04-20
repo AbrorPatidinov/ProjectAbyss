@@ -1,7 +1,14 @@
 #include "../include/symbols.h"
 #include "../include/common.h"
+#include "../include/utils.h"
 #include <stdlib.h>
 #include <string.h>
+
+// --- Bytecode operand limits ---
+// These reflect what the bytecode ENCODES, not abstract language limits.
+// OP_GET_LOCAL/SET_LOCAL/GET_GLOBAL/SET_GLOBAL and CALL's argc use a single
+// byte. Going past 255 silently wraps the index and corrupts state.
+#define MAX_SLOT_INDEX 255
 
 Symbol *globals = NULL;
 int global_count = 0;
@@ -71,6 +78,10 @@ int find_struct(const char *name) {
 }
 
 void add_local(char *name, DataType type, int sid, int ad) {
+  if (local_count > MAX_SLOT_INDEX)
+    fail("Too many locals in function (max %d — bytecode uses 1-byte local index). "
+         "Refactor into smaller functions or move data into a struct.",
+         MAX_SLOT_INDEX + 1);
   if (local_count >= local_cap) {
     local_cap = local_cap ? local_cap * 2 : INIT_CAP;
     locals = realloc(locals, local_cap * sizeof(Symbol));
@@ -84,6 +95,10 @@ void add_local(char *name, DataType type, int sid, int ad) {
 }
 
 void add_global(char *name, DataType type, int sid, int ad) {
+  if (global_count > MAX_SLOT_INDEX)
+    fail("Too many globals (max %d — bytecode uses 1-byte global index). "
+         "Consider grouping related globals into a struct.",
+         MAX_SLOT_INDEX + 1);
   if (global_count >= global_cap) {
     global_cap = global_cap ? global_cap * 2 : INIT_CAP;
     globals = realloc(globals, global_cap * sizeof(Symbol));
@@ -96,6 +111,19 @@ void add_global(char *name, DataType type, int sid, int ad) {
 }
 
 int add_struct(char *name) {
+  // Idempotent: if a struct with this name is already registered (e.g. from
+  // pass 1), return the existing sid and reset field state so the caller's
+  // parse loop can cleanly re-populate fields. This is essential for the
+  // two-pass compiler where pass 1 registers symbols and pass 2 re-walks
+  // the same declarations emitting bytecode.
+  int existing = find_struct(name);
+  if (existing != -1) {
+    free(name);
+    structs[existing].field_count = 0;
+    structs[existing].is_interface = 0;
+    memset(structs[existing].fields, 0, sizeof(structs[existing].fields));
+    return existing;
+  }
   if (struct_count >= struct_cap) {
     struct_cap = struct_cap ? struct_cap * 2 : INIT_CAP;
     structs = realloc(structs, struct_cap * sizeof(StructInfo));
@@ -103,22 +131,42 @@ int add_struct(char *name) {
   int sid = struct_count;
   structs[sid].name = name;
   structs[sid].is_interface = 0;
+  structs[sid].field_count = 0;
   memset(structs[sid].fields, 0, sizeof(structs[sid].fields));
   struct_count++;
   return sid;
 }
 
 int add_func(char *name, uint32_t addr) {
+  // Idempotent for the two-pass compiler. Pass 1 registers each function
+  // with addr=0xFFFFFFFF (sentinel). Pass 2 re-registers with the real
+  // addr; we preserve the fid, overwrite addr, and reset arg_count so the
+  // caller's argument loop re-populates correctly.
+  int existing = find_func(name);
+  if (existing != -1) {
+    free(name);
+    funcs[existing].addr = addr;
+    funcs[existing].arg_count = 0;
+    return existing;
+  }
   if (func_count >= func_cap) {
     func_cap = func_cap ? func_cap * 2 : INIT_CAP;
     funcs = realloc(funcs, func_cap * sizeof(FuncInfo));
   }
   funcs[func_count].name = name;
   funcs[func_count].addr = addr;
+  funcs[func_count].arg_count = 0;
+  funcs[func_count].ret_count = 0;
   return func_count++;
 }
 
 int add_enum(char *name) {
+  int existing = find_enum(name);
+  if (existing != -1) {
+    free(name);
+    enums[existing].value_count = 0;
+    return existing;
+  }
   if (enum_count >= enum_cap) {
     enum_cap = enum_cap ? enum_cap * 2 : INIT_CAP;
     enums = realloc(enums, enum_cap * sizeof(EnumInfo));

@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../include/codegen.h"
+#include "../include/symbols.h"
 #include "../include/utils.h"
 #include "../include/common.h"
 
@@ -12,11 +13,20 @@ char **strs = NULL;
 int str_count = 0;
 static int str_cap = 0;
 
+// --- Forward-reference patch table ---
+typedef struct { size_t addr; int fid; } CallPatch;
+static CallPatch *call_patches = NULL;
+static int call_patch_count = 0;
+static int call_patch_cap = 0;
+
 void codegen_init() {
     code_cap = 1024;
     code = malloc(code_cap);
     str_cap = INIT_CAP;
     strs = malloc(str_cap * sizeof(char*));
+    call_patch_cap = 0;
+    call_patch_count = 0;
+    call_patches = NULL;
 }
 
 void emit(uint8_t b) {
@@ -48,3 +58,32 @@ int add_str(const char *s) {
 
 size_t codegen_size(void) { return code_sz; }
 uint8_t *codegen_buffer(void) { return code; }
+
+void add_call_patch(size_t patch_addr, int fid) {
+    if (call_patch_count >= call_patch_cap) {
+        call_patch_cap = call_patch_cap ? call_patch_cap * 2 : 64;
+        call_patches = realloc(call_patches, call_patch_cap * sizeof(CallPatch));
+        if (!call_patches) fail("Out of memory (call patches)");
+    }
+    call_patches[call_patch_count].addr = patch_addr;
+    call_patches[call_patch_count].fid = fid;
+    call_patch_count++;
+}
+
+void resolve_call_patches(void) {
+    for (int i = 0; i < call_patch_count; i++) {
+        uint32_t real_addr = funcs[call_patches[i].fid].addr;
+        if (real_addr == 0xFFFFFFFF)
+            fail("Internal: unresolved forward reference to '%s'",
+                 funcs[call_patches[i].fid].name);
+        emit_patch(call_patches[i].addr, real_addr);
+    }
+}
+
+void emit_call_to(int fid, uint8_t argc) {
+    emit(OP_CALL);
+    size_t patch_addr = code_sz;
+    emit32(0);  // placeholder address, resolved later
+    add_call_patch(patch_addr, fid);
+    emit(argc);
+}

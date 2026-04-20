@@ -7,6 +7,26 @@
 #include <stdlib.h>
 #include <string.h>
 
+// --- Bytecode operand limits ---
+// These enforce the encoding limits of the current bytecode at the EMIT site,
+// so overflows fail with a source-level error instead of silently wrapping
+// the byte operand and corrupting runtime state.
+#define MAX_CALL_ARGS 255        // OP_CALL argc is 1 byte
+#define MAX_RET_VALUES 8         // FuncInfo.ret_types[8] / Field.ret_types[8]
+#define MAX_STRUCT_FIELDS 64     // StructInfo.fields[64]
+#define MAX_ENUM_VALUES 64       // EnumInfo.values[64]
+
+static void check_args(int n, const char *func_name) {
+  if (n > MAX_CALL_ARGS)
+    fail("Too many arguments in call to '%s' (got %d, max %d)",
+         func_name ? func_name : "<anonymous>", n, MAX_CALL_ARGS);
+}
+
+static void check_ret_count(int n) {
+  if (n > MAX_RET_VALUES)
+    fail("Too many return values (got %d, max %d)", n, MAX_RET_VALUES);
+}
+
 // --- FORWARD DECLARATIONS ---
 DataType expression(int *struct_id, int *array_depth);
 // --- NEW PRECEDENCE ENGINE ---
@@ -19,6 +39,13 @@ void parse_enum();
 void parse_interface();
 void parse_func_tail(DataType *ret_types, int *ret_sids, int *ret_ads,
                      int ret_count, char *name);
+void parse_type(DataType *type, int *struct_id, int *array_depth);
+
+// --- Pass 1: signature scanner ---
+static void scan_program(void);
+static void scan_func_declaration(void);
+static void scan_typed_declaration(void);
+static void skip_brace_block(void);
 
 // --- LOOP CONTEXT ---
 typedef struct Loop {
@@ -315,9 +342,8 @@ DataType factor(int *struct_id, int *array_depth) {
       expect(TK_RPAREN);
       if (args != funcs[fid].arg_count)
         fail("Arg count mismatch");
-      emit(OP_CALL);
-      emit32(funcs[fid].addr);
-      emit(args);
+      check_args(args, name);
+      emit_call_to(fid, args);
       free(name);
       *struct_id = funcs[fid].ret_struct_ids[0];
       *array_depth = funcs[fid].ret_array_depths[0];
@@ -394,6 +420,7 @@ DataType factor(int *struct_id, int *array_depth) {
           if (args != structs[parent_sid].fields[field_idx].arg_count)
             fail("Interface method arg count mismatch");
 
+          check_args(args, structs[parent_sid].fields[field_idx].name);
           emit(OP_CALL_DYN_BOT);
           emit(args);
 
@@ -961,6 +988,7 @@ void statement() {
       count++;
     } while (accept(TK_COMMA));
     expect(TK_SEMI);
+    check_ret_count(count);
     emit(OP_RET);
     emit(count);
     return;
@@ -1163,9 +1191,8 @@ void statement() {
       }
       expect(TK_RPAREN);
       expect(TK_SEMI);
-      emit(OP_CALL);
-      emit32(funcs[fid].addr);
-      emit(args);
+      check_args(args, func_name);
+      emit_call_to(fid, args);
       for (int i = count - 1; i >= 0; i--) {
         int lid = find_local(names[i]);
         int gid = find_global(names[i]);
@@ -1229,9 +1256,8 @@ void statement() {
       }
       expect(TK_RPAREN);
       expect(TK_SEMI);
-      emit(OP_CALL);
-      emit32(funcs[fid].addr);
-      emit(args);
+      check_args(args, name);
+      emit_call_to(fid, args);
       for (int i = 0; i < funcs[fid].ret_count; i++)
         emit(OP_POP);
       free(name);
@@ -1290,6 +1316,7 @@ void statement() {
         }
         expect(TK_RPAREN);
         expect(TK_SEMI);
+        check_args(args, name);
         emit(OP_CALL);
         emit32(funcs[fid].addr);
         emit(args);
@@ -1454,6 +1481,7 @@ void statement() {
           if (args != structs[parent_sid].fields[field_idx].arg_count)
             fail("Interface method arg count mismatch");
 
+          check_args(args, structs[parent_sid].fields[field_idx].name);
           emit(OP_CALL_DYN_BOT);
           emit(args);
 
@@ -1613,6 +1641,9 @@ void parse_struct() {
   expect(TK_LBRACE);
   int offset = 0;
   while (cur.kind != TK_RBRACE) {
+    if (offset >= MAX_STRUCT_FIELDS)
+      fail("Struct '%s' has too many fields (max %d)",
+           structs[sid].name, MAX_STRUCT_FIELDS);
     DataType t;
     int fsid;
     int ad;
@@ -1642,6 +1673,9 @@ void parse_enum() {
   expect(TK_LBRACE);
   int current_val = 0;
   while (cur.kind != TK_RBRACE) {
+    if (enums[eid].value_count >= MAX_ENUM_VALUES)
+      fail("Enum '%s' has too many values (max %d)",
+           enums[eid].name, MAX_ENUM_VALUES);
     if (cur.kind != TK_ID)
       fail("Expected enum value name");
     char *vname = strdup(cur.text);
@@ -1877,11 +1911,189 @@ void parse_func() {
   fail("Internal compiler error");
 }
 
-void parse_program() {
+// ---------------------------------------------------------------------------
+// Pass 1: signature scanner
+// ---------------------------------------------------------------------------
+// Walks the entire source before the real parse, registering every top-level
+// symbol (structs, enums, interfaces, function signatures) so that pass 2 can
+// call a function defined anywhere in the file — including mutual recursion.
+//
+// Pass 1 never emits bytecode. It only populates symbol tables. Function
+// bodies are skipped by brace-counting. Globals are skipped entirely (their
+// initializer bytecode is emitted in pass 2).
+//
+// Functions registered here have addr = 0xFFFFFFFF (sentinel). Pass 2 calls
+// add_func again for the same name and overwrites addr with the real value.
+// ---------------------------------------------------------------------------
+
+static void skip_brace_block(void) {
+  expect(TK_LBRACE);
+  int depth = 1;
+  while (depth > 0 && cur.kind != TK_EOF) {
+    if (cur.kind == TK_LBRACE)
+      depth++;
+    else if (cur.kind == TK_RBRACE) {
+      depth--;
+      if (depth == 0)
+        break;
+    }
+    next();
+  }
+  expect(TK_RBRACE);
+}
+
+static void scan_func_declaration(void) {
+  expect(TK_FUNCTION);
+  if (cur.kind != TK_ID)
+    fail("Expected function name");
+  char *name = strdup(cur.text);
+  next();
+  while (accept(TK_DOT)) {
+    if (cur.kind != TK_ID)
+      fail("Expected identifier after dot");
+    size_t len = strlen(name) + 1 + strlen(cur.text) + 1;
+    name = realloc(name, len);
+    strcat(name, ".");
+    strcat(name, cur.text);
+    next();
+  }
+  int fid = add_func(name, 0xFFFFFFFF);
+  funcs[fid].arg_count = 0;
+
+  expect(TK_LPAREN);
+  if (cur.kind != TK_RPAREN) {
+    do {
+      DataType at;
+      int asid, aad;
+      parse_type(&at, &asid, &aad);
+      if (cur.kind != TK_ID)
+        fail("Expected arg name");
+      next();
+      funcs[fid].arg_count++;
+    } while (accept(TK_COMMA));
+  }
+  expect(TK_RPAREN);
+
+  int ret_count = 0;
+  if (accept(TK_COLON)) {
+    if (accept(TK_LPAREN)) {
+      do {
+        if (ret_count >= MAX_RET_VALUES)
+          fail("Too many return values (max %d)", MAX_RET_VALUES);
+        parse_type(&funcs[fid].ret_types[ret_count],
+                   &funcs[fid].ret_struct_ids[ret_count],
+                   &funcs[fid].ret_array_depths[ret_count]);
+        ret_count++;
+        if (cur.kind == TK_ID)
+          next(); // skip name
+      } while (accept(TK_COMMA));
+      expect(TK_RPAREN);
+    } else {
+      parse_type(&funcs[fid].ret_types[0], &funcs[fid].ret_struct_ids[0],
+                 &funcs[fid].ret_array_depths[0]);
+      ret_count = 1;
+    }
+  } else {
+    funcs[fid].ret_types[0] = TYPE_VOID;
+    funcs[fid].ret_struct_ids[0] = -1;
+    funcs[fid].ret_array_depths[0] = 0;
+    ret_count = 1;
+  }
+  funcs[fid].ret_count = ret_count;
+
+  skip_brace_block();
+}
+
+static void scan_typed_declaration(void) {
+  DataType t;
+  int sid, ad;
+  parse_type(&t, &sid, &ad);
+  if (cur.kind != TK_ID)
+    fail("Expected identifier");
+  char *name = strdup(cur.text);
+  next();
+  if (cur.kind == TK_LPAREN) {
+    // `<type> name(args) { body }` — typed function form
+    int fid = add_func(name, 0xFFFFFFFF);
+    funcs[fid].arg_count = 0;
+    expect(TK_LPAREN);
+    if (cur.kind != TK_RPAREN) {
+      do {
+        DataType at;
+        int asid, aad;
+        parse_type(&at, &asid, &aad);
+        if (cur.kind != TK_ID)
+          fail("Expected arg name");
+        next();
+        funcs[fid].arg_count++;
+      } while (accept(TK_COMMA));
+    }
+    expect(TK_RPAREN);
+    funcs[fid].ret_count = 1;
+    funcs[fid].ret_types[0] = t;
+    funcs[fid].ret_struct_ids[0] = sid;
+    funcs[fid].ret_array_depths[0] = ad;
+    skip_brace_block();
+  } else {
+    // Global — skip initializer, register in pass 2.
+    while (cur.kind != TK_SEMI && cur.kind != TK_EOF)
+      next();
+    expect(TK_SEMI);
+    free(name);
+  }
+}
+
+static void scan_program(void) {
   next();
   while (cur.kind != TK_EOF) {
     if (cur.kind == TK_IMPORT) {
-      next(); // skip 'import'
+      next();
+      char path[256] = {0};
+      if (cur.kind != TK_ID)
+        fail("Expected module name");
+      strcat(path, cur.text);
+      next();
+      while (accept(TK_DOT)) {
+        strcat(path, "/");
+        if (cur.kind != TK_ID)
+          fail("Expected module part");
+        strcat(path, cur.text);
+        next();
+      }
+      strcat(path, ".al");
+      expect(TK_SEMI);
+      lexer_include(path);
+    } else if (cur.kind == TK_ENUM) {
+      parse_enum();
+    } else if (cur.kind == TK_INTERFACE) {
+      parse_interface();
+    } else if (cur.kind == TK_STRUCT) {
+      parse_struct();
+    } else if (cur.kind == TK_FUNCTION) {
+      scan_func_declaration();
+    } else {
+      scan_typed_declaration();
+    }
+  }
+}
+
+void parse_program() {
+  // Pass 1: register every top-level symbol. No bytecode emitted — parse_*
+  // functions called here only touch symbol tables; the scanner skips function
+  // bodies and global initializers (both are bytecode-producing).
+  scan_program();
+
+  // Reset lexer to the start of the top-level source for the second pass.
+  lexer_reset_to_start();
+  lexer_reset_imports();
+
+  // Pass 2: full parse with bytecode emission. All forward references to
+  // functions now resolve through the patch table (emit_call_to), which the
+  // resolver at the end of this function rewrites to real addresses.
+  next();
+  while (cur.kind != TK_EOF) {
+    if (cur.kind == TK_IMPORT) {
+      next();
       char path[256] = {0};
       if (cur.kind != TK_ID)
         fail("Expected module name");
@@ -1945,4 +2157,7 @@ void parse_program() {
       }
     }
   }
+
+  // Resolve every OP_CALL placeholder address recorded during pass 2.
+  resolve_call_patches();
 }
