@@ -4,55 +4,59 @@
 #include "common.h"
 
 typedef struct {
-    char *name;
-    DataType type;
-    int struct_id;
-    int array_depth;
-    int offset;
+  char *name;
+  DataType type;
+  int struct_id;
+  int array_depth;
+  int offset;
 } Symbol;
 
 typedef struct {
-    char *name;
-    int offset;
-    DataType type;
-    int struct_id;
-    int array_depth;
+  char *name;
+  int offset;
+  DataType type;
+  int struct_id;
+  int array_depth;
 
-    // For interfaces
-    int arg_count;
-    int ret_count;
-    DataType ret_types[8];
-    int ret_sids[8];
-    int ret_ads[8];
+  // For interfaces
+  int arg_count;
+  int ret_count;
+  DataType ret_types[8];
+  int ret_sids[8];
+  int ret_ads[8];
 } Field;
 
 typedef struct {
-    char *name;
-    Field fields[64];
-    int field_count;
-    int size;
-    int is_interface;
+  char *name;
+  Field fields[64];
+  int field_count;
+  int size;
+  int is_interface;
 } StructInfo;
 
 typedef struct {
-    char *name;
-    uint32_t addr;
-    DataType ret_types[8];
-    int ret_struct_ids[8];
-    int ret_array_depths[8];
-    int ret_count;
-    int arg_count;
+  char *name;
+  uint32_t addr;
+  DataType ret_types[8];
+  int ret_struct_ids[8];
+  int ret_array_depths[8];
+  int ret_count;
+  int arg_count;
+  // --- Phase B: argument types for type checking at call sites ---
+  DataType arg_types[32]; // up to 32 tracked arg types per function
+  int arg_struct_ids[32];
+  int arg_array_depths[32];
 } FuncInfo;
 
 typedef struct {
-    char *name;
-    int value;
+  char *name;
+  int value;
 } EnumValue;
 
 typedef struct {
-    char *name;
-    EnumValue values[64];
-    int value_count;
+  char *name;
+  EnumValue values[64];
+  int value_count;
 } EnumInfo;
 
 extern Symbol *globals;

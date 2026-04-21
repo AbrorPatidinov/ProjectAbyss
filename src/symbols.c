@@ -79,7 +79,8 @@ int find_struct(const char *name) {
 
 void add_local(char *name, DataType type, int sid, int ad) {
   if (local_count > MAX_SLOT_INDEX)
-    fail("Too many locals in function (max %d — bytecode uses 1-byte local index). "
+    fail("Too many locals in function (max %d — bytecode uses 1-byte local "
+         "index). "
          "Refactor into smaller functions or move data into a struct.",
          MAX_SLOT_INDEX + 1);
   if (local_count >= local_cap) {

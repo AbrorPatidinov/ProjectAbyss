@@ -11,10 +11,10 @@
 // These enforce the encoding limits of the current bytecode at the EMIT site,
 // so overflows fail with a source-level error instead of silently wrapping
 // the byte operand and corrupting runtime state.
-#define MAX_CALL_ARGS 255        // OP_CALL argc is 1 byte
-#define MAX_RET_VALUES 8         // FuncInfo.ret_types[8] / Field.ret_types[8]
-#define MAX_STRUCT_FIELDS 64     // StructInfo.fields[64]
-#define MAX_ENUM_VALUES 64       // EnumInfo.values[64]
+#define MAX_CALL_ARGS 255    // OP_CALL argc is 1 byte
+#define MAX_RET_VALUES 8     // FuncInfo.ret_types[8] / Field.ret_types[8]
+#define MAX_STRUCT_FIELDS 64 // StructInfo.fields[64]
+#define MAX_ENUM_VALUES 64   // EnumInfo.values[64]
 
 static void check_args(int n, const char *func_name) {
   if (n > MAX_CALL_ARGS)
@@ -25,6 +25,96 @@ static void check_args(int n, const char *func_name) {
 static void check_ret_count(int n) {
   if (n > MAX_RET_VALUES)
     fail("Too many return values (got %d, max %d)", n, MAX_RET_VALUES);
+}
+
+// --- Phase B: type compatibility ---
+// Returns a readable name for a DataType/struct-id/array-depth triple.
+static const char *type_name(DataType t, int sid, int ad) {
+  (void)sid;
+  (void)ad;
+  if (ad > 0)
+    return "array";
+  switch (t) {
+  case TYPE_VOID:
+    return "void";
+  case TYPE_INT:
+    return "int";
+  case TYPE_FLOAT:
+    return "float";
+  case TYPE_CHAR:
+    return "char";
+  case TYPE_STR:
+    return "str";
+  case TYPE_STRUCT:
+    return "struct";
+  case TYPE_ARRAY:
+    return "array";
+  }
+  return "unknown";
+}
+
+// Check that `src` is assignable to `dst` under Option B semantics.
+// Emits a conversion opcode if widening is needed (e.g. int -> float).
+// Fails with a clear message on incompatible or narrowing assignments.
+static void check_assign_compat(DataType dst, int dst_sid, int dst_ad,
+                                DataType src, int src_sid, int src_ad,
+                                const char *context) {
+  // Null (encoded as int 0) is assignable to any pointer-like type.
+  if (src == TYPE_INT && (dst == TYPE_STR || dst == TYPE_STRUCT ||
+                          dst == TYPE_ARRAY || dst_ad > 0))
+    return; // allow null to pointer
+
+  // Exact match
+  if (dst == src && dst_sid == src_sid && dst_ad == src_ad)
+    return;
+
+  // Arrays: any-element assignable only if ad matches; element type loose for
+  // now
+  if (dst_ad > 0 || src_ad > 0) {
+    if (dst_ad != src_ad)
+      fail("%s: cannot assign %s to %s (array depth mismatch)", context,
+           type_name(src, src_sid, src_ad), type_name(dst, dst_sid, dst_ad));
+    return;
+  }
+
+  // Struct: sid must match
+  if (dst == TYPE_STRUCT || src == TYPE_STRUCT) {
+    if (dst != src || dst_sid != src_sid)
+      fail("%s: cannot assign %s to %s", context,
+           type_name(src, src_sid, src_ad), type_name(dst, dst_sid, dst_ad));
+    return;
+  }
+
+  // Widening: int <- char  (Option B, lossless direction)
+  if (dst == TYPE_INT && src == TYPE_CHAR)
+    return;
+
+  // Widening: float <- int | char (conversion opcode handles it at caller site)
+  if (dst == TYPE_FLOAT && (src == TYPE_INT || src == TYPE_CHAR)) {
+    emit(OP_I2F);
+    return;
+  }
+
+  // Narrowing: char <- int  (Option B, forbidden)
+  if (dst == TYPE_CHAR && src == TYPE_INT)
+    fail("%s: cannot assign int to char implicitly (narrowing, may lose data). "
+         "If intentional, use explicit modulo: `c = val %% 256;`",
+         context);
+
+  // Narrowing: int <- float
+  if (dst == TYPE_INT && src == TYPE_FLOAT)
+    fail("%s: cannot assign float to int implicitly (narrowing, truncates). "
+         "If intentional, multiply and cast through an integer helper.",
+         context);
+
+  // str mismatch
+  if (dst == TYPE_STR && src != TYPE_STR)
+    fail("%s: cannot assign %s to str (use `str(x)` or `\"\" + x` to convert)",
+         context, type_name(src, src_sid, src_ad));
+
+  // Unhandled combination
+  fail("%s: cannot assign %s to %s", context, type_name(src, src_sid, src_ad),
+       type_name(dst, dst_sid, dst_ad));
 }
 
 // --- FORWARD DECLARATIONS ---
@@ -152,6 +242,14 @@ DataType factor(int *struct_id, int *array_depth) {
     emit32((uint32_t)cur.ival);
     next();
     return TYPE_INT;
+  }
+  if (accept(TK_NULL)) {
+    // null is a typed pointer zero. At the bytecode level it's a 0 int.
+    // The type system treats it as pointer-compatible with str/struct/array.
+    emit(OP_CONST_INT);
+    emit32(0);
+    return TYPE_STR; // any pointer type accepts null; TYPE_STR as neutral
+    // pointer
   }
   if (cur.kind == TK_NUM_FLOAT) {
     emit(OP_CONST_FLOAT);
@@ -332,16 +430,32 @@ DataType factor(int *struct_id, int *array_depth) {
         fail("Undefined function '%s'", name);
 
       int args = 0;
+      DataType arg_t[32];
+      int arg_s[32];
+      int arg_a[32];
       if (cur.kind != TK_RPAREN) {
         do {
-          int d1, d2;
-          expression(&d1, &d2);
+          if (args < 32) {
+            arg_t[args] = expression(&arg_s[args], &arg_a[args]);
+          } else {
+            int d1, d2;
+            expression(&d1, &d2);
+          }
           args++;
         } while (accept(TK_COMMA));
       }
       expect(TK_RPAREN);
       if (args != funcs[fid].arg_count)
-        fail("Arg count mismatch");
+        fail("Arg count mismatch calling '%s' (expected %d, got %d)", name,
+             funcs[fid].arg_count, args);
+      // Option B arg-type checking: each arg must match declared signature.
+      for (int i = 0; i < args && i < 32 && i < funcs[fid].arg_count; i++) {
+        char ctx[128];
+        snprintf(ctx, sizeof(ctx), "call to '%s' arg %d", name, i + 1);
+        check_assign_compat(
+            funcs[fid].arg_types[i], funcs[fid].arg_struct_ids[i],
+            funcs[fid].arg_array_depths[i], arg_t[i], arg_s[i], arg_a[i], ctx);
+      }
       check_args(args, name);
       emit_call_to(fid, args);
       free(name);
@@ -685,9 +799,24 @@ DataType term(int *struct_id, int *array_depth) {
     next();
     int d1, d2;
     DataType t2 = unary(&d1, &d2);
-    if (op == TK_MOD)
+    if (op == TK_MOD) {
+      // Modulo is integer-only. Auto-promotion makes no sense here.
+      if (t == TYPE_FLOAT || t2 == TYPE_FLOAT)
+        fail(
+            "Modulo (%%) is integer-only; use std.math for floating-point mod");
       emit(OP_MOD);
-    else if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+    } else if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+      // Promote the integer side(s) to float BEFORE the float op.
+      // Stack layout: [LHS][RHS]. RHS is on top.
+      if (t == TYPE_INT && t2 == TYPE_FLOAT) {
+        // Convert LHS (under RHS): swap, convert, swap back.
+        emit(OP_SWAP);
+        emit(OP_I2F);
+        emit(OP_SWAP);
+      } else if (t == TYPE_FLOAT && t2 == TYPE_INT) {
+        // RHS on top; convert in place.
+        emit(OP_I2F);
+      }
       emit(op == TK_MUL ? OP_MUL_F : OP_DIV_F);
       t = TYPE_FLOAT;
     } else
@@ -704,11 +833,41 @@ DataType add_expr(int *struct_id, int *array_depth) {
     int d1, d2;
     DataType t2 = term(&d1, &d2);
 
-    // Dynamic String Concatenation!
-    if (op == TK_PLUS && t == TYPE_STR && t2 == TYPE_STR) {
-      emit(OP_STR_CAT);
+    // --- Dynamic string concatenation with auto-conversion of numeric side ---
+    if (op == TK_PLUS && (t == TYPE_STR || t2 == TYPE_STR)) {
+      if (t == TYPE_STR && t2 == TYPE_STR) {
+        emit(OP_STR_CAT);
+      } else if (t == TYPE_STR && t2 == TYPE_INT) {
+        emit(OP_INT_TO_STR);
+        emit(OP_STR_CAT);
+      } else if (t == TYPE_STR && t2 == TYPE_FLOAT) {
+        emit(OP_FLOAT_TO_STR);
+        emit(OP_STR_CAT);
+      } else if (t == TYPE_INT && t2 == TYPE_STR) {
+        // LHS int is under the str. Swap, convert LHS to str, swap back, then
+        // cat.
+        emit(OP_SWAP);
+        emit(OP_INT_TO_STR);
+        emit(OP_SWAP);
+        emit(OP_STR_CAT);
+      } else if (t == TYPE_FLOAT && t2 == TYPE_STR) {
+        emit(OP_SWAP);
+        emit(OP_FLOAT_TO_STR);
+        emit(OP_SWAP);
+        emit(OP_STR_CAT);
+      } else {
+        fail("Cannot concatenate str with this type");
+      }
       t = TYPE_STR;
     } else if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+      // Int-to-float promotion for mixed arithmetic.
+      if (t == TYPE_INT && t2 == TYPE_FLOAT) {
+        emit(OP_SWAP);
+        emit(OP_I2F);
+        emit(OP_SWAP);
+      } else if (t == TYPE_FLOAT && t2 == TYPE_INT) {
+        emit(OP_I2F);
+      }
       emit(op == TK_PLUS ? OP_ADD_F : OP_SUB_F);
       t = TYPE_FLOAT;
     } else
@@ -738,6 +897,14 @@ DataType rel_expr(int *struct_id, int *array_depth) {
     int d1, d2;
     DataType t2 = shift_expr(&d1, &d2);
     if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+      // Promote int side to float before float comparison.
+      if (t == TYPE_INT && t2 == TYPE_FLOAT) {
+        emit(OP_SWAP);
+        emit(OP_I2F);
+        emit(OP_SWAP);
+      } else if (t == TYPE_FLOAT && t2 == TYPE_INT) {
+        emit(OP_I2F);
+      }
       if (op == TK_LT)
         emit(OP_LT_F);
       else if (op == TK_LE)
@@ -769,6 +936,13 @@ DataType equality_expr(int *struct_id, int *array_depth) {
     int d1, d2;
     DataType t2 = rel_expr(&d1, &d2);
     if (t == TYPE_FLOAT || t2 == TYPE_FLOAT) {
+      if (t == TYPE_INT && t2 == TYPE_FLOAT) {
+        emit(OP_SWAP);
+        emit(OP_I2F);
+        emit(OP_SWAP);
+      } else if (t == TYPE_FLOAT && t2 == TYPE_INT) {
+        emit(OP_I2F);
+      }
       emit(op == TK_EQ ? OP_EQ_F : OP_NE_F);
     } else {
       emit(op == TK_EQ ? OP_EQ : OP_NE);
@@ -808,22 +982,59 @@ DataType bitwise_or_expr(int *struct_id, int *array_depth) {
   return t;
 }
 
+// Short-circuit logical AND.
+// Semantics: if LHS is false (zero), whole expression is 0; don't evaluate RHS.
+// Emits: <LHS> ; DUP ; JZ end ; POP ; <RHS> ; NORMALIZE ; end:
+// Result is always 0 or 1 (normalized), pushed once.
 DataType logical_and_expr(int *struct_id, int *array_depth) {
   DataType t = bitwise_or_expr(struct_id, array_depth);
   while (accept(TK_AND)) {
+    // LHS already on stack. Normalize it to 0 or 1 first.
+    emit(OP_CONST_INT);
+    emit32(0);
+    emit(OP_NE);  // stack: (LHS != 0) ? 1 : 0
+    emit(OP_DUP); // keep a copy for the jump test
+    emit(OP_JZ);
+    size_t patch_short = code_sz;
+    emit32(0);
+    emit(OP_POP); // discard the duplicate; evaluate RHS
     int d1, d2;
     bitwise_or_expr(&d1, &d2);
-    emit(OP_AND);
+    // Normalize RHS to 0 or 1 as well
+    emit(OP_CONST_INT);
+    emit32(0);
+    emit(OP_NE);
+    emit_patch(patch_short, code_sz);
+    t = TYPE_INT;
   }
   return t;
 }
 
+// Short-circuit logical OR.
+// Semantics: if LHS is true (non-zero), whole expression is 1; don't evaluate
+// RHS.
 DataType logical_or_expr(int *struct_id, int *array_depth) {
   DataType t = logical_and_expr(struct_id, array_depth);
   while (accept(TK_OR)) {
+    // Normalize LHS to 0/1
+    emit(OP_CONST_INT);
+    emit32(0);
+    emit(OP_NE);
+    emit(OP_DUP);
+    // Invert: JZ jumps if top is zero. We want to jump past RHS if LHS is TRUE.
+    // So negate, JZ-on-false, i.e. use OP_NOT then OP_JZ.
+    emit(OP_NOT);
+    emit(OP_JZ);
+    size_t patch_short = code_sz;
+    emit32(0);
+    emit(OP_POP); // LHS was false, discard; evaluate RHS
     int d1, d2;
     logical_and_expr(&d1, &d2);
-    emit(OP_OR);
+    emit(OP_CONST_INT);
+    emit32(0);
+    emit(OP_NE);
+    emit_patch(patch_short, code_sz);
+    t = TYPE_INT;
   }
   return t;
 }
@@ -1030,53 +1241,94 @@ void statement() {
       next();
       int lid = find_local(name);
       int gid = find_global(name);
+
+// Emit a load of the variable for read-modify-write forms
+#define LOAD_VAR()                                                             \
+  do {                                                                         \
+    if (lid != -1) {                                                           \
+      emit(OP_GET_LOCAL);                                                      \
+      emit(locals[lid].offset);                                                \
+    } else {                                                                   \
+      emit(OP_GET_GLOBAL);                                                     \
+      emit(gid);                                                               \
+    }                                                                          \
+  } while (0)
+#define STORE_VAR()                                                            \
+  do {                                                                         \
+    if (lid != -1) {                                                           \
+      emit(OP_SET_LOCAL);                                                      \
+      emit(locals[lid].offset);                                                \
+    } else {                                                                   \
+      emit(OP_SET_GLOBAL);                                                     \
+      emit(gid);                                                               \
+    }                                                                          \
+  } while (0)
+
       if (accept(TK_INC)) {
-        if (lid != -1) {
-          emit(OP_GET_LOCAL);
-          emit(locals[lid].offset);
-          emit(OP_CONST_INT);
-          emit32(1);
-          emit(OP_ADD);
-          emit(OP_SET_LOCAL);
-          emit(locals[lid].offset);
-        } else {
-          emit(OP_GET_GLOBAL);
-          emit(gid);
-          emit(OP_CONST_INT);
-          emit32(1);
-          emit(OP_ADD);
-          emit(OP_SET_GLOBAL);
-          emit(gid);
-        }
+        LOAD_VAR();
+        emit(OP_CONST_INT);
+        emit32(1);
+        emit(OP_ADD);
+        STORE_VAR();
       } else if (accept(TK_DEC)) {
-        if (lid != -1) {
-          emit(OP_GET_LOCAL);
-          emit(locals[lid].offset);
-          emit(OP_CONST_INT);
-          emit32(1);
-          emit(OP_SUB);
-          emit(OP_SET_LOCAL);
-          emit(locals[lid].offset);
-        } else {
-          emit(OP_GET_GLOBAL);
-          emit(gid);
-          emit(OP_CONST_INT);
-          emit32(1);
-          emit(OP_SUB);
-          emit(OP_SET_GLOBAL);
-          emit(gid);
-        }
+        LOAD_VAR();
+        emit(OP_CONST_INT);
+        emit32(1);
+        emit(OP_SUB);
+        STORE_VAR();
       } else if (accept(TK_ASSIGN)) {
         int d1, d2;
         expression(&d1, &d2);
-        if (lid != -1) {
-          emit(OP_SET_LOCAL);
-          emit(locals[lid].offset);
-        } else {
-          emit(OP_SET_GLOBAL);
-          emit(gid);
+        STORE_VAR();
+      } else if (cur.kind == TK_PLUS_ASSIGN || cur.kind == TK_MINUS_ASSIGN ||
+                 cur.kind == TK_MUL_ASSIGN || cur.kind == TK_DIV_ASSIGN ||
+                 cur.kind == TK_MOD_ASSIGN || cur.kind == TK_SHL_ASSIGN ||
+                 cur.kind == TK_SHR_ASSIGN || cur.kind == TK_BIT_AND_ASSIGN ||
+                 cur.kind == TK_BIT_OR_ASSIGN ||
+                 cur.kind == TK_BIT_XOR_ASSIGN) {
+        TkKind op = cur.kind;
+        next();
+        LOAD_VAR();
+        int d1, d2;
+        expression(&d1, &d2);
+        switch (op) {
+        case TK_PLUS_ASSIGN:
+          emit(OP_ADD);
+          break;
+        case TK_MINUS_ASSIGN:
+          emit(OP_SUB);
+          break;
+        case TK_MUL_ASSIGN:
+          emit(OP_MUL);
+          break;
+        case TK_DIV_ASSIGN:
+          emit(OP_DIV);
+          break;
+        case TK_MOD_ASSIGN:
+          emit(OP_MOD);
+          break;
+        case TK_SHL_ASSIGN:
+          emit(OP_SHL);
+          break;
+        case TK_SHR_ASSIGN:
+          emit(OP_SHR);
+          break;
+        case TK_BIT_AND_ASSIGN:
+          emit(OP_BIT_AND);
+          break;
+        case TK_BIT_OR_ASSIGN:
+          emit(OP_BIT_OR);
+          break;
+        case TK_BIT_XOR_ASSIGN:
+          emit(OP_BIT_XOR);
+          break;
+        default:
+          fail("Internal: unreachable compound op");
         }
+        STORE_VAR();
       }
+#undef LOAD_VAR
+#undef STORE_VAR
       free(name);
     }
     expect(TK_RPAREN);
@@ -1177,20 +1429,118 @@ void statement() {
         fail("Expected func call");
       char *func_name = strdup(cur.text);
       next();
+
+      // --- Check if this is an interface method call: obj.method(...) ---
+      if (cur.kind == TK_DOT) {
+        // Resolve obj as a local/global; look up method via its interface type.
+        int lid = find_local(func_name);
+        int gid = find_global(func_name);
+        if (lid == -1 && gid == -1)
+          fail("Undefined variable '%s' in tuple-dispatch call", func_name);
+
+        DataType ot = (lid != -1) ? locals[lid].type : globals[gid].type;
+        int osid = (lid != -1) ? locals[lid].struct_id : globals[gid].struct_id;
+        if (ot != TYPE_STRUCT || osid < 0 || !structs[osid].is_interface)
+          fail("Tuple unpacking via '.' requires an interface variable");
+
+        next(); // consume TK_DOT
+        if (cur.kind != TK_ID)
+          fail("Expected method name after '.'");
+        char *method_name = strdup(cur.text);
+        next();
+
+        // Find field in interface
+        int field_idx = -1;
+        for (int i = 0; i < structs[osid].field_count; i++) {
+          if (!strcmp(structs[osid].fields[i].name, method_name)) {
+            field_idx = i;
+            break;
+          }
+        }
+        if (field_idx == -1)
+          fail("Unknown interface method '%s'", method_name);
+
+        // Push obj, then load method pointer from field.
+        if (lid != -1) {
+          emit(OP_GET_LOCAL);
+          emit(locals[lid].offset);
+        } else {
+          emit(OP_GET_GLOBAL);
+          emit(gid);
+        }
+        emit(OP_GET_FIELD);
+        emit(structs[osid].fields[field_idx].offset);
+
+        expect(TK_LPAREN);
+        int args = 0;
+        if (cur.kind != TK_RPAREN) {
+          do {
+            int d1, d2;
+            expression(&d1, &d2);
+            args++;
+          } while (accept(TK_COMMA));
+        }
+        expect(TK_RPAREN);
+        expect(TK_SEMI);
+
+        if (args != structs[osid].fields[field_idx].arg_count)
+          fail("Interface method arg count mismatch");
+        if (count != structs[osid].fields[field_idx].ret_count)
+          fail("Tuple unpack count does not match interface method return "
+               "count");
+        check_args(args, method_name);
+
+        emit(OP_CALL_DYN_BOT);
+        emit(args);
+
+        for (int i = count - 1; i >= 0; i--) {
+          int vlid = find_local(names[i]);
+          int vgid = find_global(names[i]);
+          if (vlid != -1) {
+            emit(OP_SET_LOCAL);
+            emit(locals[vlid].offset);
+          } else if (vgid != -1) {
+            emit(OP_SET_GLOBAL);
+            emit(vgid);
+          }
+          free(names[i]);
+        }
+        free(method_name);
+        free(func_name);
+        return;
+      }
+
       expect(TK_LPAREN);
       int fid = find_func(func_name);
       if (fid == -1)
         fail("Undefined func");
       int args = 0;
+      DataType arg_t[32];
+      int arg_s[32];
+      int arg_a[32];
       if (cur.kind != TK_RPAREN) {
         do {
-          int d1, d2;
-          expression(&d1, &d2);
+          if (args < 32)
+            arg_t[args] = expression(&arg_s[args], &arg_a[args]);
+          else {
+            int d1, d2;
+            expression(&d1, &d2);
+          }
           args++;
         } while (accept(TK_COMMA));
       }
       expect(TK_RPAREN);
       expect(TK_SEMI);
+      if (args != funcs[fid].arg_count)
+        fail("Arg count mismatch calling '%s' (expected %d, got %d)", func_name,
+             funcs[fid].arg_count, args);
+      for (int i = 0; i < args && i < 32 && i < funcs[fid].arg_count; i++) {
+        char ctx[128];
+        snprintf(ctx, sizeof(ctx), "call to '%s' arg %d", func_name, i + 1);
+        check_assign_compat(
+            funcs[fid].arg_types[i], funcs[fid].arg_struct_ids[i],
+            funcs[fid].arg_array_depths[i], arg_t[i], arg_s[i], arg_a[i], ctx);
+      }
       check_args(args, func_name);
       emit_call_to(fid, args);
       for (int i = count - 1; i >= 0; i--) {
@@ -1247,15 +1597,32 @@ void statement() {
       if (fid == -1)
         fail("Undefined func");
       int args = 0;
+      DataType arg_t[32];
+      int arg_s[32];
+      int arg_a[32];
       if (cur.kind != TK_RPAREN) {
         do {
-          int d1, d2;
-          expression(&d1, &d2);
+          if (args < 32)
+            arg_t[args] = expression(&arg_s[args], &arg_a[args]);
+          else {
+            int d1, d2;
+            expression(&d1, &d2);
+          }
           args++;
         } while (accept(TK_COMMA));
       }
       expect(TK_RPAREN);
       expect(TK_SEMI);
+      if (args != funcs[fid].arg_count)
+        fail("Arg count mismatch calling '%s' (expected %d, got %d)", name,
+             funcs[fid].arg_count, args);
+      for (int i = 0; i < args && i < 32 && i < funcs[fid].arg_count; i++) {
+        char ctx[128];
+        snprintf(ctx, sizeof(ctx), "call to '%s' arg %d", name, i + 1);
+        check_assign_compat(
+            funcs[fid].arg_types[i], funcs[fid].arg_struct_ids[i],
+            funcs[fid].arg_array_depths[i], arg_t[i], arg_s[i], arg_a[i], ctx);
+      }
       check_args(args, name);
       emit_call_to(fid, args);
       for (int i = 0; i < funcs[fid].ret_count; i++)
@@ -1307,15 +1674,33 @@ void statement() {
         if (fid == -1)
           fail("Undefined func '%s'", name);
         int args = 0;
+        DataType arg_t[32];
+        int arg_s[32];
+        int arg_a[32];
         if (cur.kind != TK_RPAREN) {
           do {
-            int d1, d2;
-            expression(&d1, &d2);
+            if (args < 32)
+              arg_t[args] = expression(&arg_s[args], &arg_a[args]);
+            else {
+              int d1, d2;
+              expression(&d1, &d2);
+            }
             args++;
           } while (accept(TK_COMMA));
         }
         expect(TK_RPAREN);
         expect(TK_SEMI);
+        if (args != funcs[fid].arg_count)
+          fail("Arg count mismatch calling '%s' (expected %d, got %d)", name,
+               funcs[fid].arg_count, args);
+        for (int i = 0; i < args && i < 32 && i < funcs[fid].arg_count; i++) {
+          char ctx[128];
+          snprintf(ctx, sizeof(ctx), "call to '%s' arg %d", name, i + 1);
+          check_assign_compat(funcs[fid].arg_types[i],
+                              funcs[fid].arg_struct_ids[i],
+                              funcs[fid].arg_array_depths[i], arg_t[i],
+                              arg_s[i], arg_a[i], ctx);
+        }
         check_args(args, name);
         emit(OP_CALL);
         emit32(funcs[fid].addr);
@@ -1414,6 +1799,61 @@ void statement() {
       int d1, d2;
       expression(&d1, &d2);
       emit(OP_SUB);
+      if (lid != -1) {
+        emit(OP_SET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_SET_GLOBAL);
+        emit(gid);
+      }
+      expect(TK_SEMI);
+      free(name);
+      return;
+    }
+    // --- Compound assigns: *=, /=, %=, <<=, >>=, &=, |=, ^= ---
+    if (cur.kind == TK_MUL_ASSIGN || cur.kind == TK_DIV_ASSIGN ||
+        cur.kind == TK_MOD_ASSIGN || cur.kind == TK_SHL_ASSIGN ||
+        cur.kind == TK_SHR_ASSIGN || cur.kind == TK_BIT_AND_ASSIGN ||
+        cur.kind == TK_BIT_OR_ASSIGN || cur.kind == TK_BIT_XOR_ASSIGN) {
+      TkKind op = cur.kind;
+      next();
+      if (lid != -1) {
+        emit(OP_GET_LOCAL);
+        emit(locals[lid].offset);
+      } else {
+        emit(OP_GET_GLOBAL);
+        emit(gid);
+      }
+      int d1, d2;
+      expression(&d1, &d2);
+      switch (op) {
+      case TK_MUL_ASSIGN:
+        emit(OP_MUL);
+        break;
+      case TK_DIV_ASSIGN:
+        emit(OP_DIV);
+        break;
+      case TK_MOD_ASSIGN:
+        emit(OP_MOD);
+        break;
+      case TK_SHL_ASSIGN:
+        emit(OP_SHL);
+        break;
+      case TK_SHR_ASSIGN:
+        emit(OP_SHR);
+        break;
+      case TK_BIT_AND_ASSIGN:
+        emit(OP_BIT_AND);
+        break;
+      case TK_BIT_OR_ASSIGN:
+        emit(OP_BIT_OR);
+        break;
+      case TK_BIT_XOR_ASSIGN:
+        emit(OP_BIT_XOR);
+        break;
+      default:
+        fail("internal: unhandled compound assign");
+      }
       if (lid != -1) {
         emit(OP_SET_LOCAL);
         emit(locals[lid].offset);
@@ -1642,8 +2082,8 @@ void parse_struct() {
   int offset = 0;
   while (cur.kind != TK_RBRACE) {
     if (offset >= MAX_STRUCT_FIELDS)
-      fail("Struct '%s' has too many fields (max %d)",
-           structs[sid].name, MAX_STRUCT_FIELDS);
+      fail("Struct '%s' has too many fields (max %d)", structs[sid].name,
+           MAX_STRUCT_FIELDS);
     DataType t;
     int fsid;
     int ad;
@@ -1674,8 +2114,8 @@ void parse_enum() {
   int current_val = 0;
   while (cur.kind != TK_RBRACE) {
     if (enums[eid].value_count >= MAX_ENUM_VALUES)
-      fail("Enum '%s' has too many values (max %d)",
-           enums[eid].name, MAX_ENUM_VALUES);
+      fail("Enum '%s' has too many values (max %d)", enums[eid].name,
+           MAX_ENUM_VALUES);
     if (cur.kind != TK_ID)
       fail("Expected enum value name");
     char *vname = strdup(cur.text);
@@ -1789,6 +2229,7 @@ void parse_func_tail(DataType *ret_types, int *ret_sids, int *ret_ads,
   }
   expect(TK_LPAREN);
   local_count = 0;
+  funcs[fid].arg_count = 0;
   if (cur.kind != TK_RPAREN) {
     do {
       DataType at;
@@ -1798,6 +2239,12 @@ void parse_func_tail(DataType *ret_types, int *ret_sids, int *ret_ads,
       if (cur.kind != TK_ID)
         fail("Expected arg name");
       add_local(strdup(cur.text), at, asid, aad);
+      int idx = funcs[fid].arg_count;
+      if (idx < 32) {
+        funcs[fid].arg_types[idx] = at;
+        funcs[fid].arg_struct_ids[idx] = asid;
+        funcs[fid].arg_array_depths[idx] = aad;
+      }
       funcs[fid].arg_count++;
       next();
     } while (accept(TK_COMMA));
@@ -1841,6 +2288,7 @@ void parse_func() {
     int fid = add_func(name, code_sz);
     expect(TK_LPAREN);
     local_count = 0;
+    funcs[fid].arg_count = 0;
     if (cur.kind != TK_RPAREN) {
       do {
         DataType at;
@@ -1850,6 +2298,12 @@ void parse_func() {
         if (cur.kind != TK_ID)
           fail("Expected arg name");
         add_local(strdup(cur.text), at, asid, aad);
+        int idx = funcs[fid].arg_count;
+        if (idx < 32) {
+          funcs[fid].arg_types[idx] = at;
+          funcs[fid].arg_struct_ids[idx] = asid;
+          funcs[fid].arg_array_depths[idx] = aad;
+        }
         funcs[fid].arg_count++;
         next();
       } while (accept(TK_COMMA));
@@ -1969,6 +2423,12 @@ static void scan_func_declaration(void) {
       if (cur.kind != TK_ID)
         fail("Expected arg name");
       next();
+      int idx = funcs[fid].arg_count;
+      if (idx < 32) {
+        funcs[fid].arg_types[idx] = at;
+        funcs[fid].arg_struct_ids[idx] = asid;
+        funcs[fid].arg_array_depths[idx] = aad;
+      }
       funcs[fid].arg_count++;
     } while (accept(TK_COMMA));
   }
@@ -2025,6 +2485,12 @@ static void scan_typed_declaration(void) {
         if (cur.kind != TK_ID)
           fail("Expected arg name");
         next();
+        int idx = funcs[fid].arg_count;
+        if (idx < 32) {
+          funcs[fid].arg_types[idx] = at;
+          funcs[fid].arg_struct_ids[idx] = asid;
+          funcs[fid].arg_array_depths[idx] = aad;
+        }
         funcs[fid].arg_count++;
       } while (accept(TK_COMMA));
     }

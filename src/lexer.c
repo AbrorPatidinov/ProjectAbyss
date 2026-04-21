@@ -203,6 +203,26 @@ void next() {
         pos++;
       continue;
     }
+    if (src[pos] == '/' && src[pos + 1] == '*') {
+      pos += 2;
+      col += 2;
+      while (src[pos] && !(src[pos] == '*' && src[pos + 1] == '/')) {
+        if (src[pos] == '\n') {
+          line++;
+          col = 1;
+        } else {
+          col++;
+        }
+        pos++;
+      }
+      if (src[pos]) {
+        pos += 2; // skip closing */
+        col += 2;
+      } else {
+        fail("Unterminated block comment");
+      }
+      continue;
+    }
     break;
   }
 
@@ -290,12 +310,30 @@ void next() {
       cur.kind = TK_BREAK;
     else if (!strcmp(cur.text, "continue"))
       cur.kind = TK_CONTINUE;
+    else if (!strcmp(cur.text, "null"))
+      cur.kind = TK_NULL;
     else
       cur.kind = TK_ID;
     return;
   }
 
   if (isdigit(src[pos])) {
+    // Hex literal: 0x...
+    if (src[pos] == '0' && (src[pos + 1] == 'x' || src[pos + 1] == 'X')) {
+      pos += 2;
+      col += 2;
+      char *hex_start = src + pos;
+      while (isxdigit(src[pos])) {
+        pos++;
+        col++;
+      }
+      if (src + pos == hex_start)
+        fail("Expected hex digits after 0x");
+      cur.kind = TK_NUM_INT;
+      cur.text = strndup(start, (src + pos) - start);
+      cur.ival = (int64_t)strtoull(hex_start, NULL, 16);
+      return;
+    }
     while (isdigit(src[pos])) {
       pos++;
       col++;
@@ -315,6 +353,55 @@ void next() {
       cur.text = strndup(start, (src + pos) - start);
       cur.ival = strtoll(cur.text, NULL, 10);
     }
+    return;
+  }
+
+  // Char literal: 'A', '\n', '\t', '\\', '\'', '\0'
+  if (src[pos] == '\'') {
+    pos++;
+    col++;
+    int64_t ch;
+    if (src[pos] == '\\') {
+      pos++;
+      col++;
+      char esc = src[pos++];
+      col++;
+      switch (esc) {
+      case 'n':
+        ch = '\n';
+        break;
+      case 't':
+        ch = '\t';
+        break;
+      case 'r':
+        ch = '\r';
+        break;
+      case '0':
+        ch = '\0';
+        break;
+      case '\\':
+        ch = '\\';
+        break;
+      case '\'':
+        ch = '\'';
+        break;
+      case '"':
+        ch = '"';
+        break;
+      default:
+        fail("Unknown escape sequence '\\%c'", esc);
+      }
+    } else {
+      ch = (unsigned char)src[pos++];
+      col++;
+    }
+    if (src[pos] != '\'')
+      fail("Expected closing ' in char literal");
+    pos++;
+    col++;
+    cur.kind = TK_NUM_INT;
+    cur.ival = ch;
+    cur.text = NULL;
     return;
   }
 
@@ -386,6 +473,55 @@ void next() {
     pos += 2;
     col += 2;
     cur.kind = TK_MINUS_ASSIGN;
+    return;
+  }
+  if (!strncmp(src + pos, "*=", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_MUL_ASSIGN;
+    return;
+  }
+  if (!strncmp(src + pos, "/=", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_DIV_ASSIGN;
+    return;
+  }
+  if (!strncmp(src + pos, "%=", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_MOD_ASSIGN;
+    return;
+  }
+  if (!strncmp(src + pos, "&=", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_BIT_AND_ASSIGN;
+    return;
+  }
+  if (!strncmp(src + pos, "|=", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_BIT_OR_ASSIGN;
+    return;
+  }
+  if (!strncmp(src + pos, "^=", 2)) {
+    pos += 2;
+    col += 2;
+    cur.kind = TK_BIT_XOR_ASSIGN;
+    return;
+  }
+  // 3-char BEFORE 2-char to prevent "<<" eating ahead of "<<="
+  if (!strncmp(src + pos, "<<=", 3)) {
+    pos += 3;
+    col += 3;
+    cur.kind = TK_SHL_ASSIGN;
+    return;
+  }
+  if (!strncmp(src + pos, ">>=", 3)) {
+    pos += 3;
+    col += 3;
+    cur.kind = TK_SHR_ASSIGN;
     return;
   }
   if (!strncmp(src + pos, "&&", 2)) {

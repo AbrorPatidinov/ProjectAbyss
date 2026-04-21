@@ -7,7 +7,24 @@
 **Author:** Abrorbek Patidinov
 **License:** Apache 2.0
 **Repository:** [github.com/AbrorPatidinov/ProjectAbyss](https://github.com/AbrorPatidinov/ProjectAbyss)
-**This document describes:** Bytecode version 12 · 29/29 regression tests green (VM + Native)
+**This document describes:** Bytecode version 13 · 29/29 regression tests green (VM + Native)
+
+---
+
+## What's new in v13
+
+- **Character literals:** `'A'`, `'\n'`, `'\t'`, `'\\'`, `'\''`, `'\0'`, `'\r'`, `'\"'`
+- **Hex literals:** `0xFF`, `0xDEADBEEF`
+- **Block comments:** `/* ... */`
+- **`null` keyword** for pointer-typed variables
+- **Full compound assignment operators:** `*=` `/=` `%=` `<<=` `>>=` `&=` `|=` `^=` (plus existing `+=` `-=`), in both statements and for-loop step
+- **Short-circuit `&&` and `||`** — the RHS is skipped entirely when the LHS already decides the result
+- **Int ↔ float auto-promotion** in arithmetic and comparisons — mixing `int` and `float` now yields correct `float` results (previously produced silent corruption)
+- **String + number concatenation** — `"x=" + 42` and `"pi=" + 3.14` now work via implicit numeric→string conversion
+- **Tuple returns through interface dispatch** — `a, b = obj.method(x);`
+- **Argument type checking at call sites** — passing a `float` where `int` is expected is now a compile-time error
+- **Option B int/char distinction** — widening allowed (`int ← char`), narrowing forbidden (`char ← int`) with a suggested fix in the error message
+- **Float modulo** now errors cleanly instead of silently producing garbage
 
 ---
 
@@ -33,10 +50,11 @@
 18. [Standard Library Reference](#18-standard-library-reference)
 19. [Compile-Time Limits](#19-compile-time-limits)
 20. [Runtime Safety Guarantees](#20-runtime-safety-guarantees)
-21. [Gotchas & Things That May Surprise You](#21-gotchas--things-that-may-surprise-you)
-22. [Grammar Summary](#22-grammar-summary)
-23. [Architecture Overview](#23-architecture-overview)
-24. [Roadmap](#24-roadmap)
+21. [Type System & Conversions](#21-type-system--conversions)
+22. [Gotchas & Things That May Surprise You](#22-gotchas--things-that-may-surprise-you)
+23. [Grammar Summary](#23-grammar-summary)
+24. [Architecture Overview](#24-architecture-overview)
+25. [Roadmap](#25-roadmap)
 
 ---
 
@@ -48,7 +66,7 @@
 make clean && make
 ```
 
-This produces two binaries:
+Produces:
 
 - `abyssc` — The AbyssLang compiler
 - `abyss_vm` — The Resonance Virtual Machine
@@ -73,7 +91,7 @@ void main() {
 ./hello
 ```
 
-### Verify Your Install
+### Verify Install
 
 ```bash
 bash tests/run.sh
@@ -88,15 +106,35 @@ AbyssLang is statically typed. Every variable must be declared with its type.
 
 ### Primitive Types
 
-| Type    | Storage          | Description                                          | Example               |
-|---------|------------------|------------------------------------------------------|-----------------------|
-| `int`   | 64-bit signed    | Signed integer                                       | `int age = 25;`       |
-| `float` | 64-bit IEEE-754  | Double-precision floating point                      | `float pi = 3.14159;` |
-| `char`  | 64-bit slot      | Integer treated as a character value (see gotcha §21)| `char grade = 65;`    |
-| `str`   | pointer          | Null-terminated string (pointer to byte data)        | `str name = "Abyss";` |
-| `void`  | —                | No value (function return type only)                 | `void main() { }`     |
+| Type    | Storage          | Description                                      | Example               |
+|---------|------------------|--------------------------------------------------|-----------------------|
+| `int`   | 64-bit signed    | Signed integer                                   | `int age = 25;`       |
+| `float` | 64-bit IEEE-754  | Double-precision floating point                  | `float pi = 3.14159;` |
+| `char`  | 64-bit slot      | Character value (see §21 for char vs int)        | `char grade = 'A';`   |
+| `str`   | pointer          | Null-terminated string                           | `str name = "Abyss";` |
+| `void`  | —                | No value (return type only)                      | `void main() { }`     |
 
-> **Note on `char`:** Internally every value on the AbyssLang stack is a 64-bit slot. `char` is a type label that tells the compiler you intend to use the low byte as an ASCII character. There is no truncation on assignment — `char c = 300;` stores 300; only the print path interprets the low byte. Character literals like `'A'` are **not supported**; use the numeric value (`char grade = 65;`) or write a UTF-8 string (`str grade = "A";`) instead.
+### Numeric Literals
+
+```
+int dec = 42;          // decimal
+int hex = 0xFF;        // hexadecimal (255)
+int neg = -100;        // negated
+float pi = 3.14159;    // float literal (requires the decimal point)
+```
+
+### Character Literals
+
+```
+char A = 'A';          // 65
+char newline = '\n';   // 10
+char tab = '\t';       // 9
+char null_ch = '\0';   // 0
+char quote = '\'';     // 39
+char backslash = '\\'; // 92
+```
+
+Character literals produce integer values at the bytecode level but are compatible with `char`-typed variables.
 
 ### Variable Declaration
 
@@ -106,33 +144,32 @@ int score = 100;
 float velocity = 9.81;
 str greeting = "Hello";
 
-// Without initializer — ZERO-INITIALIZED
+// Without initializer — zero-initialized
 int counter;     // counter == 0
-float f;         // f     == 0.0
-str s;           // s     == NULL pointer (DO NOT use without assigning first)
+float f;         // f == 0.0
+str s;           // s == NULL pointer (don't use without assigning first)
 ```
 
-> **Warning:** Declaring a `str` or struct-pointer variable without initializing it produces a **null pointer**. Reading fields from or passing it to functions that dereference it will crash the VM. Always assign before use.
+> **Warning:** Declaring a `str` or struct-pointer variable without initializing it produces a **null pointer**. Use `null` explicitly:
+>
+> ```
+> str s = null;                     // explicit, clear intent
+> if (s == null) { return; }        // null comparison works
+> ```
 
-### No Implicit Type Promotion
+### Type Promotion
 
-**AbyssLang does NOT auto-promote `int` to `float` in mixed-type arithmetic.** If you add an `int` to a `float`, the compiler treats both operands as floats at the bit level — which silently corrupts results.
+Mixing `int` and `float` in arithmetic auto-promotes the `int`:
 
 ```
 int a = 5;
 float b = 2.5;
-float c = a + b;   // WRONG: produces garbage (≈ 2.5, not 7.5)
-```
-
-To mix types safely, **keep all operands of the same type**:
-
-```
-float a = 5.0;     // declare as float from the start
-float b = 2.5;
 float c = a + b;   // c == 7.5  ✓
 ```
 
-This is a known limitation; a proper type-coercion layer is a roadmap item.
+The compiler emits `OP_I2F` at compile time. Pure-int or pure-float code has zero added overhead.
+
+See [§21 Type System & Conversions](#21-type-system--conversions) for the complete matrix.
 
 ---
 
@@ -140,13 +177,23 @@ This is a known limitation; a proper type-coercion layer is a roadmap item.
 
 ### Arithmetic
 
-| Operator | Description                              | Example         |
-|----------|------------------------------------------|-----------------|
-| `+`      | Addition; also string concatenation      | `a + b`         |
-| `-`      | Subtraction / unary negation             | `a - b` or `-x` |
-| `*`      | Multiplication                           | `a * b`         |
-| `/`      | Division (integer or float by type)      | `a / b`         |
-| `%`      | Modulo (**integer only** — don't use on floats; produces undefined results) | `a % b` |
+| Operator | Description                                  | Example         |
+|----------|----------------------------------------------|-----------------|
+| `+`      | Addition; string concat; number→string cat   | `a + b`         |
+| `-`      | Subtraction / unary negation                 | `a - b` or `-x` |
+| `*`      | Multiplication                               | `a * b`         |
+| `/`      | Division                                     | `a / b`         |
+| `%`      | Modulo (integer only — errors on floats)     | `a % b`         |
+
+### String Concatenation with Numbers (v13+)
+
+```
+str msg = "x = " + 42;          // "x = 42"
+str pi = "pi = " + 3.14;        // "pi = 3.140000"
+str mix = "err code " + 0xFF;   // "err code 255"
+```
+
+Works both directions: `42 + "ms"` and `"ms: " + 42` both succeed.
 
 ### Comparison
 
@@ -159,19 +206,27 @@ This is a known limitation; a proper type-coercion layer is a roadmap item.
 | `<=`     | Less than or equal    |
 | `>=`     | Greater than or equal |
 
-All comparisons return `int` (0 for false, 1 for true). There is no distinct `bool` type.
+All return `int` (0 or 1). Mixed int/float comparisons auto-promote the int side.
 
-### Logical
+### Logical (Short-Circuit in v13+)
 
-| Operator | Description |
-|----------|-------------|
-| `&&`     | Logical AND |
-| `\|\|`   | Logical OR  |
-| `!`      | Logical NOT |
+| Operator | Description              |
+|----------|--------------------------|
+| `&&`     | Short-circuit logical AND |
+| `\|\|`   | Short-circuit logical OR  |
+| `!`      | Logical NOT              |
 
-Operands are treated as truthy if non-zero. Result is `int` (0 or 1).
+`&&` skips the RHS when LHS is false. `||` skips the RHS when LHS is true:
 
-> **Note:** `&&` and `\|\|` are **not short-circuiting** in the current implementation. Both sides are always evaluated. Write guards as `if (ptr != 0) { ... ptr.field ... }` rather than relying on `if (ptr != 0 && ptr.field > 0)`.
+```
+// Null guard — ptr.field is never evaluated if ptr is null
+if (ptr != null && ptr.field > 0) { ... }
+
+// Early-out — expensive_check() only runs when needed
+if (cheap_check() || expensive_check()) { ... }
+```
+
+Implemented via `OP_JZ` branch-and-skip. Zero cost for the skipped side.
 
 ### Bitwise
 
@@ -184,17 +239,25 @@ Operands are treated as truthy if non-zero. Result is `int` (0 or 1).
 | `<<`     | Left shift    | `val << 2`     |
 | `>>`     | Right shift   | `val >> 4`     |
 
-### Assignment
+### Assignment & Compound Assignment (v13+)
 
-| Operator | Description          | Equivalent     |
-|----------|----------------------|----------------|
-| `=`      | Assign               | `x = 5`        |
-| `+=`     | Add and assign       | `x = x + 5`    |
-| `-=`     | Subtract and assign  | `x = x - 5`    |
-| `++`     | Increment by 1       | `x = x + 1`    |
-| `--`     | Decrement by 1       | `x = x - 1`    |
+| Operator | Description            |
+|----------|------------------------|
+| `=`      | Assign                 |
+| `+=`     | Add and assign         |
+| `-=`     | Subtract and assign    |
+| `*=`     | Multiply and assign    |
+| `/=`     | Divide and assign      |
+| `%=`     | Modulo and assign      |
+| `<<=`    | Left-shift and assign  |
+| `>>=`    | Right-shift and assign |
+| `&=`     | Bit-AND and assign     |
+| `\|=`    | Bit-OR and assign      |
+| `^=`     | Bit-XOR and assign     |
+| `++`     | Increment by 1         |
+| `--`     | Decrement by 1         |
 
-> `*=` and `/=` are not currently supported; use the long form.
+All compound operators work in regular statements **and** in for-loop step expressions.
 
 ### Ternary
 
@@ -253,69 +316,54 @@ while (i < 100) {
 for (int i = 0; i < 100; i++) {
     print(i);
 }
-```
 
-> **For-loop step restriction.** The step expression accepts only `var++`, `var--`, and `var = expression`. Compound assignment in the step (`i += 2`, `i -= N`) **is not supported** and will fail with a parse error. Workaround: use an inner `while` or move the step inside the body:
->
-> ```
-> // NOT ALLOWED:
-> // for (int i = 0; i < 100; i += 2) { ... }
->
-> // WORKS:
-> int i = 0;
-> while (i < 100) {
->     // body
->     i = i + 2;
-> }
->
-> // ALSO WORKS (using the `= expr` form):
-> for (int i = 0; i < 100; i = i + 2) { /* body */ }
-> ```
+// v13+: any compound assign works in the step
+for (int i = 0; i < 100; i += 2) { print(i); }
+for (int i = 1024; i > 0; i >>= 1) { print(i); }
+```
 
 ### break & continue
 
 ```
 for (int i = 0; i < 100; i++) {
-    if (i % 2 != 0) { continue; }  // Skip odd numbers
-    if (i > 50)     { break;    }  // Stop at 50
+    if (i % 2 != 0) { continue; }
+    if (i > 50)     { break;    }
     print(i);
 }
 ```
 
 ### Block Scoping
 
-Variables declared inside `{ }` blocks are scoped to that block:
-
 ```
 {
     int temp = 42;
     print(temp);   // works
 }
-// temp is no longer accessible here — using it is a compile error
+// temp no longer accessible — using it is a compile error
 ```
 
-For-loop iteration variables are also block-scoped.
+For-loop iteration variables are block-scoped.
 
 ---
 
 ## 5. Functions
 
-### Basic Declaration
+### Declarations
 
-Three equivalent syntaxes:
+Three equivalent forms:
 
 ```
-// Syntax 1: void functions
+// Form 1: void function
 void greet() {
     print("Hello!");
 }
 
-// Syntax 2: return type before the name
+// Form 2: return type before name
 int double_it(int x) {
     return x * 2;
 }
 
-// Syntax 3: `function` keyword with named returns
+// Form 3: `function` keyword with named returns
 function square(int x) : (int result) {
     return x * x;
 }
@@ -323,11 +371,11 @@ function square(int x) : (int result) {
 
 ### Forward References
 
-**Functions may be called before they are defined.** AbyssLang uses two-pass compilation — signatures are collected first, bodies are compiled second — so ordering doesn't matter:
+Functions may be called before they are defined. Two-pass compilation collects signatures first, then compiles bodies:
 
 ```
 void main() {
-    print(is_even(10));   // defined below; still works
+    print(is_even(10));   // defined below, still works
 }
 
 int is_even(int n) {
@@ -343,8 +391,6 @@ int is_odd(int n) {      // mutually recursive with is_even
 
 ### Multiple Return Values (Tuples)
 
-Functions can return up to **8** values. Callers unpack them with comma-separated assignment:
-
 ```
 function divide(int a, int b) : (int quot, int rem) {
     quot = a / b;
@@ -353,19 +399,55 @@ function divide(int a, int b) : (int quot, int rem) {
 }
 
 void main() {
-    int q;
-    int r;
+    int q; int r;
     q, r = divide(17, 5);
     print("17 / 5 = %int remainder %int", q, r);
     // Output: 17 / 5 = 3 remainder 2
 }
 ```
 
-> **Limitation:** Tuple unpacking only works with **direct function calls**, not through interface dispatch. `a, b = obj.method();` is not supported; use single-return methods through interfaces.
+**v13+:** Tuples also work through interface dispatch:
+
+```
+interface Divider {
+    function split(int v) : (int half, int rem);
+}
+
+function half_split(int v) : (int a, int b) {
+    a = v / 2;
+    b = v % 2;
+    return a, b;
+}
+
+void main() {
+    Divider d = stack(Divider);
+    d.split = half_split;
+
+    int h; int r;
+    h, r = d.split(17);        // interface tuple dispatch
+    print("%int %int", h, r);   // 8 1
+}
+```
+
+### Argument Type Checking (v13+)
+
+The compiler verifies every argument type at compile time:
+
+```
+void take_int(int x) { print(x); }
+
+void main() {
+    char c = 'A';
+    take_int(c);   // OK — widening char → int
+
+    float f = 3.14;
+    take_int(f);   // ERROR: cannot assign float to int (narrowing)
+}
+```
+
+See [§21 Type System & Conversions](#21-type-system--conversions).
 
 ### Namespaced Functions
-
-Functions can be defined with dot-separated names for module organization:
 
 ```
 function std.math.pow(int base, int exp) : (int result) {
@@ -373,7 +455,7 @@ function std.math.pow(int base, int exp) : (int result) {
 }
 ```
 
-Callers invoke them with the full namespace path: `std.math.pow(2, 10)`.
+Callers use the full path: `std.math.pow(2, 10)`.
 
 ---
 
@@ -401,37 +483,34 @@ Player p = new(Player, "Main Character");
 p.name = "Artorias";
 p.health = 100;
 
-// Nested field access
 p.position = new(Vector, "Player Pos");
 p.position.x = 10.5;
 p.position.y = 20.0;
 
-// Compound assignment on fields
+// All compound assignments work on fields
 p.health -= 25;
+p.health *= 2;
 p.position.x += 1.0;
 
-// Increment / decrement on fields
 p.health++;
 p.health--;
 ```
 
-> **Note on memory layout:** Every struct field occupies one 64-bit slot regardless of declared type. A `char` field uses 8 bytes, not 1. This is a deliberate design choice (uniform slot size simplifies the bytecode) but means AbyssLang is not suitable for writing packed binary protocol structs directly. Use arrays of bytes (`int[]`) for packing work.
+> Every struct field occupies one 64-bit slot regardless of declared type. A `char` field uses 8 bytes, not 1. This simplifies the bytecode but means AbyssLang is not suitable for packed binary protocol structs directly. Use `int[]` for byte packing.
 
 ---
 
 ## 7. Memory Management
 
-AbyssLang gives you explicit control over memory. **There is no garbage collector.**
+AbyssLang gives explicit control over memory. **No garbage collector.**
 
 ### Heap Allocation — `new()`
 
-Allocates memory on the heap. Lives until explicitly freed with `free()`.
-
 ```
-// Struct allocation with optional Abyss Eye comment
+// With optional Abyss Eye comment
 Player p = new(Player, "Main Character");
 
-// Struct allocation without a comment
+// Without comment
 Player q = new(Player);
 ```
 
@@ -439,14 +518,14 @@ Player q = new(Player);
 
 ```
 int[] scores = new(int, 100, "Player Scores");
-int[] data   = new(int, 256);                     // no comment
+int[] data   = new(int, 256);
 ```
 
-> **Array element size is fixed at 8 bytes.** `new(char, 256)` allocates 2048 bytes, not 256. All array element access goes through 64-bit slots. This matches the struct-field slot model.
+> Element size is fixed at 8 bytes. `new(char, 256)` allocates 2048 bytes.
 
 ### Stack Allocation — `stack()`
 
-Allocates memory that is automatically freed when the enclosing function returns. Faster than heap allocation for temporary data.
+Auto-freed when the enclosing function returns. Faster than heap.
 
 ```
 function calculate() : (float result) {
@@ -454,41 +533,36 @@ function calculate() : (float result) {
     temp.x = 5.0;
     temp.y = 10.0;
     return temp.x + temp.y;
-    // No free() needed — temp vanishes when calculate() returns
+    // No free() needed — temp vanishes automatically
 }
 ```
-
-> Stack allocations are tracked by the Abyss Eye and appear in the HUD with a lightning icon (⚡) instead of the heap diamond (💎).
 
 ### Manual Free — `free()`
 
 ```
 Player p = new(Player, "Hero");
-// ... use p ...
-free(p);     // memory returned to the system; p is now a dangling pointer
+free(p);     // memory returned; p is now dangling — reassign or set p = null
 ```
 
-> **Double-free is undefined behavior.** `free(p); free(p);` may crash or silently corrupt the allocator state. Assign `p = 0;` after freeing if you want to re-check before another free — but currently there is no null-check operator that makes this safe either.
+> **Double-free is undefined.** Use `p = null;` after freeing so later access crashes fast at the null check.
 
-### Summary Table
+### Summary
 
 | Method         | Lifetime                  | Speed   | Use Case                |
 |----------------|---------------------------|---------|-------------------------|
-| `new(Type)`    | Until `free()` is called  | Normal  | Long-lived objects      |
-| `new(Type, N)` | Until `free()` is called  | Normal  | Dynamic arrays          |
+| `new(Type)`    | Until `free()` called     | Normal  | Long-lived objects      |
+| `new(Type, N)` | Until `free()` called     | Normal  | Dynamic arrays          |
 | `stack(Type)`  | Until function returns    | Fastest | Temporary / local data  |
 
 ---
 
 ## 8. Enums
 
-Enums define named integer constants. Values auto-increment from the last explicit value.
-
 ```
 enum State {
     IDLE,             // 0
     RUNNING = 5,      // 5
-    STOPPED,          // 6 (auto-increments from 5)
+    STOPPED,          // 6 (auto-increments)
     ERROR   = -1      // -1
 }
 
@@ -500,19 +574,19 @@ void main() {
 }
 ```
 
-Enums can be used as variable types. Internally they are `int`:
+Enums can be used as variable types:
 
 ```
 State s = State.IDLE;
 ```
 
-**Limit:** Max 64 values per enum. Exceeding this is a compile-time error.
+**Limit:** max 64 values per enum.
 
 ---
 
 ## 9. Interfaces
 
-Interfaces define a contract — a set of method signatures. Any function matching the signature can be assigned to an interface field at runtime, enabling dynamic dispatch.
+Interfaces define a signature contract. Any function matching the signature can be assigned to an interface field at runtime.
 
 ```
 interface MathOp {
@@ -533,32 +607,27 @@ void main() {
 }
 ```
 
-Under the hood, interface fields store function bytecode addresses; dispatch uses the `OP_CALL_DYN_BOT` opcode. There is no vtable and no runtime type identity — the interface's only guarantee is signature compatibility.
+Dispatch uses `OP_CALL_DYN_BOT` — no vtable, no runtime type identity. The only guarantee is signature compatibility.
 
-> **Limitations:** Interface methods currently support single return values only. Tuple unpacking through `obj.method()` is a roadmap item.
+**v13+:** Tuple returns through interface dispatch work (see §5).
 
 ---
 
 ## 10. Arrays
 
-Arrays are heap-allocated with a fixed size known at allocation time.
+Heap-allocated, fixed size known at allocation time.
 
 ```
-// Allocate
 int[] scores = new(int, 10, "Scores");
 
-// Write
 scores[0] = 100;
 scores[1] = 200;
 
-// Read
-print(scores[0]);    // 100
+print(scores[0]);
 
-// Increment / decrement elements in place
 scores[0]++;
 scores[1]--;
 
-// Free when done
 free(scores);
 ```
 
@@ -579,45 +648,46 @@ for (int i = 0; i < 5; i++) {
 }
 ```
 
-> **⚠ No bounds checking.** Out-of-range writes silently corrupt adjacent memory; out-of-range reads return whatever byte is at the address. This is a deliberate systems-language choice, but you should treat array length as **your** responsibility. Track lengths explicitly in a companion variable or struct field. A `--safe` compilation mode with runtime bounds checks is a planned roadmap item.
+> **⚠ No bounds checking.** Out-of-range writes silently corrupt memory. Track lengths yourself. `--safe` mode with runtime bounds checks is on the roadmap.
 
 ---
 
 ## 11. Strings
 
-### String Literals
+### Literals
 
 ```
 str greeting = "Hello, World!";
 ```
 
-Strings are pointers to null-terminated byte data. They are **not** length-prefixed.
+Null-terminated byte pointers. Not length-prefixed.
 
 ### Dynamic Concatenation
-
-The `+` operator on two `str` values allocates new heap memory:
 
 ```
 str first = "Hello, ";
 str second = "World!";
-str message = first + second;     // "Hello, World!" — heap allocated
-// ...when done with `message`, free it:
+str message = first + second;     // heap allocated
 free(message);
 ```
 
-Concatenated strings are tracked by the Abyss Eye under the special `DynString` type. This means heavy string concatenation in a loop will accumulate heap allocations — if the lifetime is bounded to a function, consider `stack()`-ed buffers instead.
+### Number Concatenation (v13+)
 
-> **`+` between `str` and `int`/`float` is not supported** and may silently produce broken output. Convert numbers to strings via `print("%int", n)` (emits to stdout), or use formatted print patterns. A `to_str()` function is a roadmap item.
+```
+int err = 0xDEAD;
+str report = "error: " + err;    // "error: 57005"
 
-### String Format Printing
+float r = 0.95;
+str label = "ratio=" + r;         // "ratio=0.950000"
+```
 
-See [§15 Formatted Print](#15-formatted-print).
+Dynamic strings are tracked by the Abyss Eye as `DynString`.
 
 ---
 
 ## 12. Error Handling
 
-AbyssLang uses `try` / `catch` / `throw` for structured error recovery. Errors are **string values only** — there is no exception object type.
+Structured `try` / `catch` / `throw`. Errors are string values only.
 
 ```
 function safe_divide(int a, int b) : (int res) {
@@ -637,7 +707,7 @@ void main() {
 }
 ```
 
-### Nested Try/Catch
+### Nested
 
 ```
 try {
@@ -654,20 +724,26 @@ try {
 
 ### What `try`/`catch` Does NOT Catch
 
-This is important. `throw` is a **cooperative** mechanism — it only triggers when your code explicitly calls it. The VM does **not** convert hardware signals or runtime errors into catchable exceptions. The following will bypass your `try` block and crash the program:
+`throw` is cooperative. The VM does not convert hardware signals into catchable exceptions:
 
-- **Division by zero** (`10 / 0`) — raises a hardware SIGFPE; process dies immediately.
-- **Null pointer dereference** (accessing a field on an unassigned `str` or struct) — segfaults.
-- **Array out-of-bounds** — silently corrupts memory (worse than crashing).
-- **Stack overflow / call-stack overflow** — caught by the VM, but terminates with a fatal error (not catchable).
+- **Division by zero** — hardware SIGFPE; dies immediately
+- **Null pointer dereference** — segfaults
+- **Array out-of-bounds** — silently corrupts memory
+- **Stack overflow** — caught by VM, fatal (not catchable)
 
-To handle these cases, **guard them before they happen**:
+Guard before the operation:
 
 ```
 function safe_divide(int a, int b) : (int res) {
-    if (b == 0) { throw "division by zero"; }     // guard FIRST
-    return a / b;                                  // then compute
+    if (b == 0) { throw "division by zero"; }
+    return a / b;
 }
+```
+
+Short-circuit makes null guards idiomatic:
+
+```
+if (ptr != null && ptr.value > 0) { /* safe */ }
 ```
 
 ---
@@ -681,29 +757,16 @@ import std.math;
 import std.time;
 ```
 
-`import std.math;` opens the file `std/math.al` relative to the current directory and includes all its definitions. Nested paths follow the same convention: `import a.b.c;` loads `a/b/c.al`.
+`import a.b.c;` loads `a/b/c.al` relative to the current directory.
 
-### Idempotent Imports
-
-Importing the same module multiple times (from different files, or even the same file) is **free** — the compiler tracks which paths have been loaded and skips duplicates silently:
+### Idempotent
 
 ```
 import std.math;
 import std.math;         // no-op; already loaded
 ```
 
-This means you can safely `import std.math;` at the top of every file that uses it, without worrying about duplicate definition errors.
-
-### Calling Imported Functions
-
-```
-int result = std.math.pow(2, 10);    // 1024
-float now  = std.time.now();
-```
-
 ### Defining Module Functions
-
-Inside `std/math.al`:
 
 ```
 function std.math.pow(int base, int exp) : (int result) {
@@ -715,31 +778,27 @@ function std.math.pow(int base, int exp) : (int result) {
 }
 ```
 
-The function name includes the full namespace path.
-
 ---
 
 ## 14. The Abyss Eye
 
-The Abyss Eye is AbyssLang's built-in memory profiler. It is not an external tool — it is woven into the instruction set at the opcode level.
+The Abyss Eye is AbyssLang's built-in memory profiler. Not an external tool — woven into the instruction set at the opcode level.
 
 ### Usage
 
 ```
-abyss_eye();     // summons the memory HUD at the current point in execution
+abyss_eye();     // summons the memory HUD at this point
 ```
 
 ### What It Displays
 
-| Section            | Information                                                                       |
-|--------------------|-----------------------------------------------------------------------------------|
-| System Resources   | Active stack/heap memory totals, freed bytes, total allocation count              |
-| Active Memory      | Every live pointer — address, size, type, variable name, scope, hex dump          |
-| Lifecycle Analysis | Full history — allocation IP → free IP; leak warnings for unfreed allocations     |
+| Section            | Information                                                             |
+|--------------------|-------------------------------------------------------------------------|
+| System Resources   | Stack/heap totals, freed bytes, allocation count                        |
+| Active Memory      | Every live pointer: address, size, type, variable name, scope, hex dump |
+| Lifecycle Analysis | Full allocation IP → free IP history; leak warnings                     |
 
 ### Memory Comments
-
-The optional string argument to `new()` and `stack()` appears in the Abyss Eye output:
 
 ```
 int[] buffer = new(int, 1024, "Network Receive Buffer");
@@ -747,29 +806,27 @@ abyss_eye();
 // Shows: buffer | Heap | 8192 bytes | Array | "Network Receive Buffer"
 ```
 
-### How the Variable Name Gets There
+### How Variable Names Get There
 
-The compiler emits a dedicated `OP_TAG_ALLOC` opcode whenever a `new()` or `stack()` result is assigned to a named variable. This opcode propagates the source-level variable name to the runtime allocation tracker, allowing the profiler to display human-readable labels next to raw memory addresses — **without any debug symbols or source maps**.
+The compiler emits `OP_TAG_ALLOC` when `new()` or `stack()` is assigned to a named variable. This propagates the source-level variable name to the runtime allocation tracker — no debug symbols needed.
 
-> Anonymous allocations (e.g. `return new(X);` passed directly without assignment) will appear in the HUD with their tag as `-`. Assign to a variable before returning if you want the name to survive.
+Dynamic allocations (`"x=" + n`, `str + str`) are labeled automatically as `DynString`, `int->str`, `float->str`, or `Dynamic String Concat`.
 
-### VM Mode vs Native Mode
+### VM vs Native Mode
 
-- **VM mode:** Full Abyss Eye with colored terminal HUD, hex dumps, and lifecycle tracking. Always on.
-- **Native mode (default):** Abyss Eye is **disabled** for zero overhead. Stubs compile to empty functions.
-- **Native mode with profiler:** pass `--eye` to enable:
+- **VM mode:** Full HUD with colored terminal output, hex dumps, lifecycle tracking. Always on.
+- **Native mode (default):** Disabled for zero overhead. Stubs compile to empty.
+- **Native + `--eye`:** Profiler active with O(1) hashtable-backed tracker.
 
   ```bash
   ./abyssc --native --eye program.al output
   ```
 
-  Native profiling uses a 65536-bucket hash table keyed on `(ptr >> 4) & 0xFFFF`, so lookup cost per allocation is O(1) amortized even under heavy workloads.
-
 ---
 
 ## 15. Formatted Print
 
-The `print()` function accepts a format string followed by arguments. Format specifiers are **type-tagged**, not positional C-style:
+Format specifiers are type-tagged:
 
 | Specifier | Type    | Example                          |
 |-----------|---------|----------------------------------|
@@ -785,222 +842,249 @@ print("Player %str scored %int points at (%float, %float)",
       name, score, x, y);
 ```
 
-### Simple Print (single value, no format string)
+### Simple Print
 
 ```
-print(42);          // emits: 42\n
-print(3.14);        // emits: 3.140000\n
-print("hello");     // emits: hello\n
-print(someChar);    // emits: <single character>   ← no trailing newline
+print(42);          // 42\n
+print(3.14);        // 3.140000\n
+print("hello");     // hello\n
+print(someChar);    // <one character>  ← no trailing newline
 ```
 
-> **Behavior note:** `print()` on `int`, `float`, or `str` appends a trailing newline. `print()` on a single `char` does **not** append a newline (uses `OP_PRINT_CHAR`, which emits one byte). If you need a newline after a char, add one explicitly.
+> `print()` of `int`/`float`/`str` appends a newline. `print()` of a single `char` does NOT (uses `OP_PRINT_CHAR`, one byte).
 
 ---
 
 ## 16. Native Bridge Functions
 
-Built-in functions that call into the host runtime:
+| Function       | Returns | Description                            |
+|----------------|---------|----------------------------------------|
+| `clock()`      | `float` | Monotonic clock, seconds since start   |
+| `input_int()`  | `int`   | Blocking line read from stdin, parsed  |
 
-| Function       | Returns | Description                                                 |
-|----------------|---------|-------------------------------------------------------------|
-| `clock()`      | `float` | High-resolution monotonic clock, seconds since program start |
-| `input_int()`  | `int`   | Blocking read of one line from stdin, parsed as integer      |
-
-> `input_int()` reads one line using `fgets` and parses with `atoll`. Non-integer input silently parses as 0 (no error). End-of-file also returns 0. If you need distinguishing behavior, validate upstream.
-
-Internal bridge functions (prefixed `__bridge_*`) exist for the stdlib's own use; they are not part of the user-facing API.
+> `input_int()` reads a line via `fgets` and parses via `atoll`. Non-integer input returns 0.
 
 ---
 
 ## 17. Compilation Modes
 
-### VM Mode — Debugging & Profiling
+### VM Mode
 
 ```bash
 ./abyssc program.al program.aby
 ./abyss_vm program.aby
 ```
 
-- Full Abyss Eye memory profiler always active
-- Deterministic stack-based execution via computed-goto dispatch (GCC label-as-value extension)
-- Bytecode format: custom binary with `ABYSSBC` magic header and version byte
+- Full Abyss Eye profiler
+- Computed-goto dispatch
+- Bytecode magic `ABYSSBC`, version byte **13**
 
-### Native AOT Mode — Production Performance
+### Native AOT Mode
 
 ```bash
 ./abyssc --native program.al program_native
 ./program_native
 ```
 
-- Transpiles bytecode to C, then invokes `gcc -O3 -flto=auto -march=native`
-- Abyss Eye **disabled** for zero overhead
-- Produces a standalone ELF binary with no runtime dependencies
-- Typical speedup over Python on real workloads: **5× to 10×** (verified: Mandelbrot 7.74×, Packet Scanner 8.02×, Prime Sieve 4.76×)
+- Bytecode → C → GCC `-O3 -flto=auto -march=native`
+- Abyss Eye disabled (zero overhead)
+- Standalone ELF binary
+- Typical: **5×–10× faster than Python** (verified: Mandelbrot 7.74×, Packet Scan 8.02×, Prime Sieve 4.76×)
 
-### Native + Profiler Mode
+### Native + Profiler
 
 ```bash
 ./abyssc --native --eye program.al program_debug
-./program_debug
 ```
 
-- Native speed with Abyss Eye active (O(1) hashtable-backed tracker)
-- Useful for profiling production-scale workloads
+Native speed with O(1)-backed Abyss Eye.
 
 ---
 
 ## 18. Standard Library Reference
 
-The standard library is written entirely in AbyssLang. Import with `import std.<module>;`.
+The standard library is written entirely in AbyssLang.
 
 ### std.math
 
-| Function                                                                          | Description                                |
-|-----------------------------------------------------------------------------------|--------------------------------------------|
-| `std.math.abs(int x) : int`                                                       | Absolute value                             |
-| `std.math.pow(int base, int exp) : int`                                           | Integer exponentiation                     |
-| `std.math.min(int a, int b) : int`                                                | Minimum of two values                      |
-| `std.math.max(int a, int b) : int`                                                | Maximum of two values                      |
-| `std.math.clamp(int val, int lo, int hi) : int`                                   | Constrain value to range                   |
-| `std.math.gcd(int a, int b) : int`                                                | Greatest common divisor (Euclid)           |
-| `std.math.lcm(int a, int b) : int`                                                | Least common multiple                      |
-| `std.math.sqrt(int n) : int`                                                      | Integer square root (Newton's method)      |
-| `std.math.factorial(int n) : int`                                                 | Factorial                                  |
-| `std.math.is_prime(int n) : int`                                                  | Primality test (6k±1 method)               |
-| `std.math.fib(int n) : int`                                                       | Nth Fibonacci number                       |
-| `std.math.map(int val, int in_lo, int in_hi, int out_lo, int out_hi) : int`       | Range mapping                              |
+| Function                                                                          | Description                            |
+|-----------------------------------------------------------------------------------|----------------------------------------|
+| `std.math.abs(int x) : int`                                                       | Absolute value                         |
+| `std.math.pow(int base, int exp) : int`                                           | Integer exponentiation                 |
+| `std.math.min(int a, int b) : int`                                                | Minimum of two                         |
+| `std.math.max(int a, int b) : int`                                                | Maximum of two                         |
+| `std.math.clamp(int val, int lo, int hi) : int`                                   | Constrain to range                     |
+| `std.math.gcd(int a, int b) : int`                                                | GCD (Euclid)                           |
+| `std.math.lcm(int a, int b) : int`                                                | LCM                                    |
+| `std.math.sqrt(int n) : int`                                                      | Integer sqrt (Newton)                  |
+| `std.math.factorial(int n) : int`                                                 | Factorial                              |
+| `std.math.is_prime(int n) : int`                                                  | Primality (6k±1)                       |
+| `std.math.fib(int n) : int`                                                       | Nth Fibonacci                          |
+| `std.math.map(int val, int in_lo, int in_hi, int out_lo, int out_hi) : int`       | Range mapping                          |
 
 ### std.time
 
-| Function                                 | Description                                |
-|------------------------------------------|--------------------------------------------|
-| `std.time.now() : float`                 | Current monotonic timestamp (seconds)      |
-| `std.time.elapsed(float start) : float`  | Seconds elapsed since `start`              |
+| Function                                 | Description                            |
+|------------------------------------------|----------------------------------------|
+| `std.time.now() : float`                 | Monotonic timestamp (seconds)          |
+| `std.time.elapsed(float start) : float`  | Seconds since `start`                  |
 
 ### std.io
 
-| Function                                  | Description                                |
-|-------------------------------------------|--------------------------------------------|
-| `std.io.banner(str text)`                 | Print decorated banner                     |
-| `std.io.separator()`                      | Print horizontal line                      |
-| `std.io.stat(str label, int value)`       | Print labeled integer                      |
-| `std.io.kv(str key, str value)`           | Print key-value pair                       |
-| `std.io.prompt_int(str msg) : int`        | Print prompt and read integer              |
-| `std.io.newline()`                        | Print blank line                           |
+| Function                                  | Description                            |
+|-------------------------------------------|----------------------------------------|
+| `std.io.banner(str text)`                 | Decorated banner                       |
+| `std.io.separator()`                      | Horizontal line                        |
+| `std.io.stat(str label, int value)`       | Labeled integer                        |
+| `std.io.kv(str key, str value)`           | Key-value pair                         |
+| `std.io.prompt_int(str msg) : int`        | Prompt + read int                      |
+| `std.io.newline()`                        | Blank line                             |
 
 ### std.array
 
-| Function                                                | Description                                |
-|---------------------------------------------------------|--------------------------------------------|
-| `std.array.fill(int[] arr, int len, int val)`           | Fill array with value                      |
-| `std.array.sum(int[] arr, int len) : int`               | Sum all elements                           |
-| `std.array.min(int[] arr, int len) : int`               | Find minimum value                         |
-| `std.array.max(int[] arr, int len) : int`               | Find maximum value                         |
-| `std.array.find(int[] arr, int len, int target) : int`  | Linear search (returns index or -1)        |
-| `std.array.count(int[] arr, int len, int target) : int` | Count occurrences                          |
-| `std.array.reverse(int[] arr, int len)`                 | Reverse array in-place                     |
-| `std.array.swap(int[] arr, int i, int j)`               | Swap two elements                          |
-| `std.array.sort(int[] arr, int len)`                    | Sort array (insertion sort)                |
-| `std.array.is_sorted(int[] arr, int len) : int`         | Check if sorted (1=yes, 0=no)              |
-| `std.array.copy(int[] src, int[] dst, int len)`         | Copy array contents                        |
+| Function                                                | Description                            |
+|---------------------------------------------------------|----------------------------------------|
+| `std.array.fill(int[] arr, int len, int val)`           | Fill with value                        |
+| `std.array.sum(int[] arr, int len) : int`               | Sum elements                           |
+| `std.array.min(int[] arr, int len) : int`               | Minimum                                |
+| `std.array.max(int[] arr, int len) : int`               | Maximum                                |
+| `std.array.find(int[] arr, int len, int target) : int`  | Linear search (index or -1)            |
+| `std.array.count(int[] arr, int len, int target) : int` | Count occurrences                      |
+| `std.array.reverse(int[] arr, int len)`                 | Reverse in-place                       |
+| `std.array.swap(int[] arr, int i, int j)`               | Swap two elements                      |
+| `std.array.sort(int[] arr, int len)`                    | Insertion sort                         |
+| `std.array.is_sorted(int[] arr, int len) : int`         | Sorted check (1=yes, 0=no)             |
+| `std.array.copy(int[] src, int[] dst, int len)`         | Copy contents                          |
 
 ---
 
 ## 19. Compile-Time Limits
 
-AbyssLang enforces hard caps on several constructs at the emit site. Exceeding them produces a clear compile-time error with a refactor hint — never silent corruption.
-
 | Construct                           | Limit | Why                                              |
 |-------------------------------------|-------|--------------------------------------------------|
-| Locals per function                 | 256   | `OP_GET_LOCAL` / `OP_SET_LOCAL` use 1-byte index |
-| Globals total                       | 256   | `OP_GET_GLOBAL` / `OP_SET_GLOBAL` use 1-byte index |
-| Arguments per function call         | 255   | `OP_CALL` argc field is 1 byte                   |
-| Return values per function          | 8     | Fixed-size return buffer in `FuncInfo`           |
-| Fields per struct                   | 64    | Fixed-size array in `StructInfo.fields[64]`      |
-| Values per enum                     | 64    | Fixed-size array in `EnumInfo.values[64]`        |
+| Locals per function                 | 256   | `OP_GET_LOCAL` uses 1-byte index                 |
+| Globals total                       | 256   | `OP_GET_GLOBAL` uses 1-byte index                |
+| Arguments per call                  | 255   | `OP_CALL` argc is 1 byte                         |
+| Tracked arg types (type-check)      | 32    | First 32 args type-checked; rest skipped         |
+| Return values per function          | 8     | Fixed buffer in `FuncInfo`                       |
+| Fields per struct                   | 64    | Fixed array in `StructInfo.fields[64]`           |
+| Values per enum                     | 64    | Fixed array in `EnumInfo.values[64]`             |
 | Imported modules total              | 128   | Static loaded-files table                        |
 
-Each limit produces a specific error message. For example:
-
-```
-[FATAL ERROR] Too many locals in function (max 256 — bytecode uses 1-byte
-local index). Refactor into smaller functions or move data into a struct.
-```
-
-If your code hits a limit, these are roadmap candidates for widening the operand size in bytecode version 13.
+Each limit produces a specific actionable error, never silent corruption.
 
 ---
 
 ## 20. Runtime Safety Guarantees
 
-The VM and native runtime enforce the following protections:
-
-### Stack Overflow Protection
-
-Every `push()` checks the stack pointer against `STACK_SIZE` (1,048,576 slots). On overflow:
+### Stack Overflow
 
 ```
 [FATAL ERROR] Stack overflow (limit 1048576 slots).
-  This usually means deep recursion or an expression that keeps
-  pushing values without popping. Check loops and recursion depth.
+  Usually deep recursion or expressions pushing without popping.
 ```
 
-### Call-Stack Overflow Protection
-
-Every `OP_CALL` checks the call depth against `CALL_STACK_SIZE` (4,096 frames). On overflow:
+### Call-Stack Overflow
 
 ```
 [FATAL ERROR] Call stack overflow (limit 4096 frames).
-  This usually means unbounded recursion. Check your base cases.
+  Usually unbounded recursion. Check base cases.
 ```
 
-Infinite recursion is **caught cleanly** — no segfault.
+Infinite recursion caught cleanly — no segfault.
 
 ### Bytecode Validation
 
-The VM checks the bytecode file's magic bytes (`ABYSSBC`) and version on load. Mismatches produce a clear error pointing to the fix:
-
 ```
 [FATAL ERROR] Bytecode version mismatch.
-  File program.aby was compiled with bytecode v11.
-  This VM expects v12. Recompile with the matching abyssc.
+  File program.aby was compiled with bytecode v12.
+  This VM expects v13. Recompile with the matching abyssc.
 ```
 
 ### What Is NOT Protected
 
-- Array bounds (see §10 and §21)
-- Null pointer dereferences (see §2, §21)
-- Double-free (see §7)
-- Division by zero (see §12)
-- Integer overflow (wraps silently; this is usually the behavior you want on 64-bit)
+- Array bounds (§10, §22)
+- Null pointer dereference (§2, §22)
+- Double-free (§7)
+- Division by zero (§12)
+- Integer overflow (wraps silently; usual 64-bit behavior)
 
-These are explicit design choices — AbyssLang is a systems language, and each check has a cost. Several are on the roadmap as opt-in flags (`--safe`, `--null-checks`).
-
----
-
-## 21. Gotchas & Things That May Surprise You
-
-A short list of behaviors that new users hit in their first hour. All are documented above; this is a summary with pointers.
-
-1. **`'A'` is not a char literal.** Use `65` or the numeric codepoint. (§2)
-2. **`int + float` does not auto-promote.** Use same-type operands. (§2)
-3. **`//` is the only comment syntax.** No `/* ... */` block comments.
-4. **`0xFF` hex literals are not supported.** Use decimal. (`0xFF = 255`)
-5. **`for (...; ...; i += 2)` fails.** Use `i = i + 2`. (§4)
-6. **`try/catch` does not catch div-by-zero or segfaults.** Guard before the operation. (§12)
-7. **Arrays have no bounds checking.** Track length yourself. (§10)
-8. **All values are 64-bit slots internally.** `char` and `int` occupy the same space. (§2, §6)
-9. **`print()` with `%` requires an exact-spelling type tag** (`%int`, `%str`, etc.). Standard C `%d`, `%s` do not work. (§15)
-10. **Uninitialized `str` is a null pointer** and using it will crash. (§2)
-11. **Double-free is undefined.** Don't call `free()` twice on the same pointer. (§7)
-12. **Logical `&&` and `\|\|` don't short-circuit.** Both sides always evaluate. (§3)
-13. **Interface methods can't return tuples yet.** Single return only through dispatch. (§9)
-14. **String + number doesn't convert.** Format with `print()`. (§11)
+Explicit design choices. Roadmap includes opt-in `--safe` flag.
 
 ---
 
-## 22. Grammar Summary
+## 21. Type System & Conversions
+
+AbyssLang v13 has a compile-time type system with **Option B semantics**: widening implicit, narrowing forbidden without explicit intent.
+
+### Conversion Matrix
+
+| Source \ Target | `int`    | `float`   | `char`    | `str`        | `struct S` | `T[]`       |
+|-----------------|----------|-----------|-----------|--------------|------------|-------------|
+| `int`           | ✓ exact  | ✓ `I2F`   | ✗ error   | ✗ (use `+`)  | null only  | null only   |
+| `float`         | ✗ error  | ✓ exact   | ✗ error   | ✗ (use `+`)  | ✗ error    | ✗ error     |
+| `char`          | ✓ widen  | ✓ `I2F`   | ✓ exact   | ✗ (use `+`)  | ✗ error    | ✗ error     |
+| `str`           | ✗ error  | ✗ error   | ✗ error   | ✓ exact      | ✗ error    | ✗ error     |
+| `null`          | ✓        | ✗ error   | ✗ error   | ✓            | ✓          | ✓           |
+| `struct S`      | ✗        | ✗         | ✗         | ✗            | ✓ if match | ✗           |
+| `T[]`           | ✗        | ✗         | ✗         | ✗            | ✗          | ✓ if match  |
+
+### Errors with Fix Hints
+
+```
+[FATAL ERROR] call to 'take_char' arg 1: cannot assign int to char implicitly
+  (narrowing, may lose data). If intentional, use explicit modulo:
+  `c = val % 256;`
+```
+
+```
+[FATAL ERROR] Cannot assign float to int implicitly (narrowing, truncates).
+  If intentional, multiply and cast through an integer helper.
+```
+
+### Arithmetic Promotion
+
+Mixing `int` and `float` auto-inserts `OP_I2F` on the int side:
+
+```
+int a = 5;
+float b = 2.5;
+float c = a + b;       // emits:  <push a> I2F <push b> ADD_F
+                       // result: 7.5
+```
+
+Pure-int and pure-float code is unchanged.
+
+### Explicit Narrowing
+
+No cast syntax yet. To narrow intentionally:
+
+```
+// int -> char: use modulo
+char c = (val % 256);
+
+// float -> int: manual truncation (std.math.trunc on roadmap)
+```
+
+---
+
+## 22. Gotchas & Things That May Surprise You
+
+1. **`//` and `/* */` are the two comment syntaxes.** Both work in v13+.
+2. **All values are 64-bit slots internally.** `char` and `int` occupy the same space. Distinction is enforced at the type level, not storage.
+3. **`print()` with `%` requires exact-spelling type tags** (`%int`, `%str`). C's `%d`, `%s` don't work.
+4. **Uninitialized `str` is null.** Using it crashes. Use `null` explicitly.
+5. **Double-free is undefined.** Don't call `free()` twice.
+6. **Arrays have no bounds checking.** Track length yourself.
+7. **`try/catch` doesn't catch hardware signals.** Guard before the op.
+8. **Interface methods returning tuples** unpack with `a, b = obj.method(x);`
+9. **`str + int` allocates.** Each concatenation is a heap allocation tracked by Abyss Eye. For hot loops, preallocate.
+10. **No cast syntax yet.** Narrowing requires explicit ops (e.g. `x % 256`).
+11. **Short-circuit is always on.** `0 && foo()` never calls `foo()`. Rely on this for null guards.
+
+---
+
+## 23. Grammar Summary
 
 | Construct        | Syntax                                                 |
 |------------------|--------------------------------------------------------|
@@ -1013,64 +1097,69 @@ A short list of behaviors that new users hit in their first hour. All are docume
 | Function (void)  | `void name(args) { ... }`                              |
 | Function (typed) | `int name(args) { return expr; }`                      |
 | Namespaced func  | `function a.b.name(args) : (ret_type ret_name) { ... }`|
-| Heap alloc       | `new(Type)` or `new(Type, "comment")`                  |
-| Array alloc      | `new(Type, size)` or `new(Type, size, "comment")`      |
-| Stack alloc      | `stack(Type)` or `stack(Type, "comment")`              |
+| Heap alloc       | `new(Type)` / `new(Type, "comment")`                   |
+| Array alloc      | `new(Type, size)` / `new(Type, size, "comment")`       |
+| Stack alloc      | `stack(Type)` / `stack(Type, "comment")`               |
 | Free memory      | `free(ptr);`                                           |
-| Print            | `print(expr)` or `print("fmt %int", val)`              |
+| Print            | `print(expr)` / `print("fmt %int", val)`               |
 | Memory profiler  | `abyss_eye();`                                         |
-| Import           | `import std.math;` (or `import a.b.c;`)                |
+| Import           | `import std.math;` / `import a.b.c;`                   |
 | Try/catch        | `try { } catch (err) { }`                              |
 | Throw            | `throw "message";`                                     |
 | Ternary          | `(cond) ? a : b`                                       |
 | For loop         | `for (int i = 0; i < n; i++) { ... }`                  |
+| For loop (step)  | `for (int i = 0; i < n; i += 2) { ... }`               |
 | While loop       | `while (cond) { ... }`                                 |
 | Break            | `break;`                                               |
 | Continue         | `continue;`                                            |
-| Comment          | `// single line only`                                  |
+| Line comment     | `// single line`                                       |
+| Block comment    | `/* multi-line */`                                     |
+| Integer literal  | `42` / `0xFF`                                          |
+| Float literal    | `3.14`                                                 |
+| Char literal     | `'A'` / `'\n'` / `'\t'` / `'\0'` ...                   |
+| String literal   | `"Hello"`                                              |
+| Null literal     | `null`                                                 |
 
 ---
 
-## 23. Architecture Overview
+## 24. Architecture Overview
 
-### The Compiler (`abyssc`)
+### Compiler (`abyssc`)
 
-A **two-pass** compiler that reads `.al` source files and emits either bytecode (`.aby`) or transpiled C code.
+**Two-pass** design:
 
-- **Pass 1 — Signature scan:** Walks the source collecting all top-level declarations (structs, enums, interfaces, function signatures, globals). No bytecode emitted.
-- **Pass 2 — Bytecode emission:** Re-walks the source with full symbol knowledge, emitting bytecode. Forward function references are resolved via a patch table.
+- **Pass 1 — Signature scan:** Collects top-level declarations (structs, enums, interfaces, function signatures with argument types, globals). No bytecode emitted.
+- **Pass 2 — Bytecode emission:** Re-walks with full symbol knowledge. Forward calls resolved via patch table. Argument types checked at every call site.
 
-Key properties:
+Properties:
 
-- **Lexer:** Handwritten scanner with file context stack for multi-file imports; tracks loaded paths for idempotent imports.
-- **Parser:** Recursive descent with 12-level precedence climbing. No AST — bytecode emitted directly during parse.
-- **Bytecode format:** Custom binary — 7-byte magic `ABYSSBC`, version byte, string table, struct table, instruction stream.
+- **Lexer:** Handwritten. File-context stack for imports. Supports decimal/hex integer literals, float literals, character literals with escapes, line + block comments.
+- **Parser:** Recursive descent, 12-level precedence climbing. No AST — bytecode emitted directly.
+- **Type checker:** Integrated. Every assignment, return, and call-site argument runs through `check_assign_compat()` with Option B.
+- **Bytecode:** `ABYSSBC` magic, version byte (13), string table, struct table, instruction stream.
 
-### The Virtual Machine (`abyss_vm`)
+### Virtual Machine (`abyss_vm`)
 
-A stack-based virtual machine with computed-goto dispatch:
+Stack-based with computed-goto dispatch:
 
-- **Stack:** 1 MiB value stack (1,048,576 slots of 64 bits each)
+- **Stack:** 1 MiB value stack (1,048,576 × 64-bit slots)
 - **Call stack:** 4,096 frames
 - **Exception stack:** 256 frames
-- **Dispatch:** Computed goto (GCC label-as-value extension)
-- **Opcodes:** 55+ instructions covering arithmetic, control flow, memory, I/O, exceptions, dynamic dispatch, and profiling
+- **Opcodes (v13):** 60+ instructions. New in v13: `OP_I2F`, `OP_F2I`, `OP_INT_TO_STR`, `OP_FLOAT_TO_STR`, `OP_SWAP`.
 
-### Native AOT Compiler
+### Native AOT
 
-Bytecode-to-C transpiler producing standalone native binaries:
-
-- **Translation:** Each bytecode opcode → equivalent C code, one statement per opcode
-- **Optimization:** GCC `-O3 -flto=auto -march=native`
-- **Value representation:** `union { int64_t i; double f; void *p; }` — eliminates memcpy overhead present in the VM
-- **Control flow:** Computed-goto jump table preserved from VM dispatch
-- **Output:** Standalone ELF binary, no runtime dependencies
+- Each opcode → equivalent C statement
+- GCC `-O3 -flto=auto -march=native`
+- Value union: `union { int64_t i; double f; void *p; }`
+- Computed-goto jump table preserved
+- Output: standalone ELF, no runtime dependencies
 
 ### Bytecode Format
 
 ```
 Bytes 0-6:   Magic "ABYSSBC"
-Byte 7:      Version number (currently 12)
+Byte 7:      Version (13)
 Bytes 8-11:  String table count
 ...          String table entries (length-prefixed)
 Next 4:      Struct table count
@@ -1081,54 +1170,40 @@ Next 4:      Code size
 
 ---
 
-## 24. Roadmap
-
-Known limitations with fixes planned. In rough priority order:
+## 25. Roadmap
 
 **Language features**
 
-- Char literals: `'A'` → 65
-- Hex literals: `0xFF`
-- Block comments: `/* ... */`
-- `*=`, `/=`, `%=`, `<<=`, `>>=`, `&=`, `\|=`, `^=` compound assignment operators
-- Full `i += N` support in for-loop step
-- Short-circuit `&&` and `\|\|`
-- `int ↔ float` auto-promotion in mixed-type arithmetic
-- `str + int` via implicit `to_str` conversion
-- Tuple returns through interface dispatch
-- `null` keyword and pointer-null comparison
-
-**Type system**
-
-- Distinguish `int` vs `char` (currently interchangeable)
-- Actual argument-type checking at call sites
+- Explicit cast syntax: `(int)f`, `(char)(n % 256)`
 - Array element-type tracking through indexing
+- `float` modulo via `std.math.fmod()`
+- Array literals: `int[] a = {1, 2, 3};`
+- Named struct literal syntax: `Vec{x=1, y=2}`
 
 **Runtime**
 
-- Optional `--safe` compile flag enabling:
+- Optional `--safe` compile flag:
   - Array bounds checks
   - Null pointer checks
   - Division-by-zero → catchable throw
-- Source line/column → bytecode mapping for runtime errors
-  (currently shown as IP offset; target is `file.al:42:13` format)
+- Source line/column in runtime errors (currently IP offset)
 - Stack trace on uncaught `throw`
 
 **Tooling**
 
-- VSCode extension polish (existing basic extension in `/releases`)
+- VSCode extension polish
 - Package manager / module registry
 - REPL
 - Debugger (step, breakpoints, variable inspection)
 
 **Ecosystem**
 
-- stdlib: `std.str` (splitting, substring, parsing)
-- stdlib: `std.fs` (file I/O beyond stdin)
-- stdlib: `std.net` (socket bindings)
-- stdlib: `std.json`
+- `std.str` (splitting, substring, parsing, to_int, trunc)
+- `std.fs` (file I/O beyond stdin)
+- `std.net` (socket bindings)
+- `std.json`
 
 ---
 
-*AbyssLang — Built from scratch. Zero dependencies. Total control.*
+*AbyssLang v13 — Built from scratch. Zero dependencies. Total control.*
 *Designed in Tashkent, Uzbekistan.*

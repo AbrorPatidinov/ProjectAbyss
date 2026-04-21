@@ -1,8 +1,8 @@
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 extern uint8_t *code;
 extern size_t code_sz;
